@@ -21,6 +21,7 @@ object MeshCoreProtocol {
     const val RESPONSE_CONTACTS_START = 0x02
     const val RESPONSE_CONTACT = 0x03
     const val RESPONSE_END_OF_CONTACTS = 0x04
+    const val PUSH_TRACE_DATA = 0x89
     const val MAX_CHANNELS = 8
 
     data class ChannelInfo(
@@ -34,9 +35,24 @@ object MeshCoreProtocol {
         val name: String,
         val type: Int,
         val flags: Int,
+        val outPathHashSize: Int,
+        val outPath: List<String>,
         val lastAdvertMillis: Long,
         val latitude: Double?,
         val longitude: Double?,
+    )
+
+    data class TraceData(
+        val tag: UInt,
+        val authCode: UInt,
+        val flags: Int,
+        val hops: List<TraceHop>,
+        val finalSnr: Float,
+    )
+
+    data class TraceHop(
+        val hash: String,
+        val snr: Float,
     )
 
     fun deviceQuery(): ByteArray = byteArrayOf(0x16, 0x03)
@@ -96,6 +112,36 @@ object MeshCoreProtocol {
         }.toByteArray()
     }
 
+    fun traceRequest(
+        tag: UInt,
+        pathHashes: List<String>,
+        hashSize: Int,
+        authCode: UInt = 0u,
+    ): ByteArray {
+        val flags = when (hashSize) {
+            1 -> 0
+            2 -> 1
+            4 -> 2
+            8 -> 3
+            else -> throw IllegalArgumentException("MeshCore trace hash size must be 1, 2, 4, or 8")
+        }
+        require(pathHashes.isNotEmpty()) { "MeshCore trace needs at least one path hop" }
+        val path = pathHashes.map { hash ->
+            val bytes = hash.hexToByteArray()
+            require(bytes.size == hashSize) {
+                "MeshCore trace path hashes must use $hashSize bytes"
+            }
+            bytes
+        }
+        return ByteArrayOutputStream().apply {
+            write(36)
+            write(littleEndianInt(tag.toInt()))
+            write(littleEndianInt(authCode.toInt()))
+            write(flags)
+            path.forEach(::write)
+        }.toByteArray()
+    }
+
     fun parseMessage(frame: ByteArray, nowMillis: Long = System.currentTimeMillis()): UnifiedMessage? {
         if (frame.isEmpty()) return null
         return when (frame[0].toInt() and 0xff) {
@@ -129,6 +175,19 @@ object MeshCoreProtocol {
             .ifBlank { publicKey.take(12) }
         val type = frame[33].toInt() and 0xff
         val flags = frame[34].toInt() and 0xff
+        val encodedPathLength = frame[35].toInt() and 0xff
+        val isFloodPath = encodedPathLength == 0xff
+        val outPathHashSize = if (isFloodPath) 0 else (encodedPathLength ushr 6) + 1
+        val outPathLength = if (isFloodPath) 0 else encodedPathLength and 0x3f
+        if (outPathLength * outPathHashSize > 64) return null
+        val outPath = if (outPathLength == 0) {
+            emptyList()
+        } else {
+            frame.copyOfRange(36, 36 + outPathLength * outPathHashSize)
+                .asIterable()
+                .chunked(outPathHashSize)
+                .map { chunk -> chunk.toByteArray().toHex() }
+        }
         val lastAdvert = readLittleEndianInt(frame, 132).toLong() and 0xffffffffL
         val rawLatitude = readLittleEndianInt(frame, 136)
         val rawLongitude = readLittleEndianInt(frame, 140)
@@ -138,10 +197,36 @@ object MeshCoreProtocol {
             name = name,
             type = type,
             flags = flags,
+            outPathHashSize = outPathHashSize,
+            outPath = outPath,
             lastAdvertMillis = lastAdvert * 1000L,
             latitude = rawLatitude.takeIf { hasPosition }?.div(1_000_000.0),
             longitude = rawLongitude.takeIf { hasPosition }?.div(1_000_000.0),
         )
+    }
+
+    fun parseTraceData(frame: ByteArray): TraceData? {
+        if (frame.size < 13 || (frame[0].toInt() and 0xff) != PUSH_TRACE_DATA) return null
+        val pathBytes = frame[2].toInt() and 0xff
+        val flags = frame[3].toInt() and 0xff
+        val hashSize = 1 shl (flags and 0x03)
+        if (pathBytes == 0 || pathBytes % hashSize != 0) return null
+        val hopCount = pathBytes / hashSize
+        val requiredSize = 12 + pathBytes + hopCount + 1
+        if (frame.size < requiredSize) return null
+        val tag = readLittleEndianInt(frame, 4).toUInt()
+        val authCode = readLittleEndianInt(frame, 8).toUInt()
+        var cursor = 12
+        val hashes = List(hopCount) {
+            frame.copyOfRange(cursor, cursor + hashSize).toHex().also {
+                cursor += hashSize
+            }
+        }
+        val hops = hashes.map { hash ->
+            TraceHop(hash, frame[cursor++].toFloat() / 4f)
+        }
+        val finalSnr = frame[cursor].toFloat() / 4f
+        return TraceData(tag, authCode, flags, hops, finalSnr)
     }
 
     fun parseMaxChannels(frame: ByteArray): Int? {

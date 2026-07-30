@@ -87,13 +87,39 @@ The panel shows:
 - the count of nodes with positions
 - a MapLibre and OpenStreetMap map
 - one marker for each positioned node
-- node identity and radio data.
+- node identity and radio data
+- a **Trace** control for each available remote node.
 
 Phones can use the Focused or Stacked layout. Tablets show both network panes. The map always uses
 the radio that is selected in its network pane.
 
 Map tiles require an Internet connection. The saved node rows and coordinates work offline. The
 app does not include offline map files.
+
+## Traceroute
+
+Traceroute uses the radio selected in the applicable network pane. It does not use another
+connected radio, even when that radio can see the same node. Select **Nodes / Map**, then select
+**Trace** on a node.
+
+The node row shows the request state, the route toward the destination, the return route when the
+protocol supplies one, and the SNR for each available link. A request times out after 60 seconds.
+The app keeps recent results in memory. It does not save them in the node database.
+
+Meshtastic uses `TRACEROUTE_APP` and `RouteDiscovery`. Results use Meshtastic node numbers. DualMesh
+uses the selected radio node database to replace known numbers with names.
+
+MeshCore uses `CMD_SEND_TRACE_PATH` and `PUSH_CODE_TRACE_DATA`. Results contain short public-key
+hashes. DualMesh replaces a hash with a contact name only when that hash has one match in the
+selected radio contact list. It shows the hash and match count when a prefix is not unique.
+
+A MeshCore trace follows the direct path that the companion stored for the contact. A repeater or
+room contact can be the center of the trace. A chat contact is not a trace hop, so its trace tests
+the stored repeater path only. A flood-only contact has no stored direct path and cannot start a
+trace.
+
+The trace request is direct protocol traffic. It does not send a text message to a channel.
+However, it does use RF airtime. Do not run repeated traces on a busy mesh.
 
 ## Android Auto map
 

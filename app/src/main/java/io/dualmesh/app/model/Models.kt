@@ -66,6 +66,34 @@ data class MeshNode(
         get() = latitude != null && longitude != null
 }
 
+enum class TraceRouteState {
+    PENDING,
+    COMPLETE,
+    TIMED_OUT,
+    ERROR,
+}
+
+data class TraceRouteHop(
+    val id: String,
+    val name: String,
+    val snr: Float? = null,
+)
+
+data class TraceRouteResult(
+    val id: String,
+    val network: MeshNetwork,
+    val deviceId: String = "",
+    val deviceName: String = "",
+    val targetId: String,
+    val targetName: String,
+    val state: TraceRouteState,
+    val forward: List<TraceRouteHop> = emptyList(),
+    val returned: List<TraceRouteHop> = emptyList(),
+    val startedAtMillis: Long,
+    val completedAtMillis: Long? = null,
+    val detail: String? = null,
+)
+
 data class UnifiedMessage(
     val id: String,
     val network: MeshNetwork,

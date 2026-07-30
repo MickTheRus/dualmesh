@@ -60,6 +60,8 @@ class MeshCoreProtocolTest {
         "Alice Radio".encodeToByteArray().copyInto(frame, destinationOffset = 100)
         frame[33] = 2
         frame[34] = 5
+        frame[35] = 0x82.toByte()
+        byteArrayOf(0x12, 0x34, 0x56, 0x78).copyInto(frame, destinationOffset = 36)
         ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(1_700_000_000)
             .array().copyInto(frame, destinationOffset = 132)
         ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(123_456)
@@ -75,9 +77,66 @@ class MeshCoreProtocolTest {
         assert(contact?.publicKey?.startsWith("000102030405") == true)
         assertEquals(2, contact?.type)
         assertEquals(5, contact?.flags)
+        assertEquals(3, contact?.outPathHashSize)
+        assertEquals(listOf("123456", "780000"), contact?.outPath)
         assertEquals(1_700_000_000_000L, contact?.lastAdvertMillis)
         assertEquals(0.123456, contact?.latitude ?: 0.0, 0.000001)
         assertEquals(-0.654321, contact?.longitude ?: 0.0, 0.000001)
+    }
+
+    @Test
+    fun traceRequestUsesTagFlagsAndPath() {
+        val frame = MeshCoreProtocol.traceRequest(
+            tag = 0x12345678u,
+            pathHashes = listOf("aabb", "ccdd"),
+            hashSize = 2,
+        )
+
+        assertEquals(36, frame[0].toInt())
+        assertArrayEquals(
+            byteArrayOf(0x78, 0x56, 0x34, 0x12),
+            frame.copyOfRange(1, 5),
+        )
+        assertEquals(1, frame[9].toInt())
+        assertArrayEquals(
+            byteArrayOf(0xaa.toByte(), 0xbb.toByte(), 0xcc.toByte(), 0xdd.toByte()),
+            frame.copyOfRange(10, 14),
+        )
+    }
+
+    @Test
+    fun parsesMultiByteTraceResponse() {
+        val frame = byteArrayOf(
+            MeshCoreProtocol.PUSH_TRACE_DATA.toByte(),
+            0,
+            4,
+            1,
+            0x78,
+            0x56,
+            0x34,
+            0x12,
+            0,
+            0,
+            0,
+            0,
+            0xaa.toByte(),
+            0xbb.toByte(),
+            0xcc.toByte(),
+            0xdd.toByte(),
+            40,
+            -8,
+            20,
+        )
+
+        val trace = MeshCoreProtocol.parseTraceData(frame)
+
+        assertNotNull(trace)
+        assertEquals(0x12345678u, trace?.tag)
+        assertEquals("aabb", trace?.hops?.get(0)?.hash)
+        assertEquals(10f, trace?.hops?.get(0)?.snr)
+        assertEquals("ccdd", trace?.hops?.get(1)?.hash)
+        assertEquals(-2f, trace?.hops?.get(1)?.snr)
+        assertEquals(5f, trace?.finalSnr)
     }
 
     @Test
@@ -174,6 +233,8 @@ class MeshCoreProtocolTest {
         repeat(10_000) {
             val frame = random.nextBytes(random.nextInt(0, 256))
             MeshCoreProtocol.parseMessage(frame)
+            MeshCoreProtocol.parseContact(frame)
+            MeshCoreProtocol.parseTraceData(frame)
         }
 
         val oversizedV3Path = ByteArray(11).also {

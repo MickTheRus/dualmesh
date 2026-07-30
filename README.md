@@ -38,6 +38,7 @@ The screenshots contain test data. They do not contain data from a real deployme
 7. Select a radio.
 8. Select one of its channels or direct-message conversations.
 9. Select **Nodes / Map** to see the node directory.
+10. Select **Trace** on a node to test its available mesh route.
 
 Enable **Packets** only when you must record protocol traffic.
 
@@ -55,6 +56,7 @@ WARNING: A packet log can contain keys, messages, node IDs, and locations.
 - Show Meshtastic reactions below the related message.
 - Save the newest 5,000 messages in SQLite.
 - Save node details and the latest node positions for each radio.
+- Run a traceroute from either technology and show its route and SNR data.
 - Restore enabled radio connections after an app restart or device restart.
 - Record optional protocol logs in JSONL files.
 - Show one network or two stacked networks on a phone.
@@ -76,6 +78,9 @@ WARNING: A packet log can contain keys, messages, node IDs, and locations.
 - A node map shows only positions that the mesh supplies.
 - Map tiles require an Internet connection.
 - The app does not include offline map files.
+- Traceroute results stay in memory. The app does not save them after it stops.
+- A MeshCore chat contact trace tests its stored repeater path. The chat endpoint is not a trace hop.
+- A MeshCore trace needs a stored direct path. A flood-only contact cannot be traced.
 - Android Auto voice input depends on the phone, host, account, and microphone.
 - The private Android Auto setup is not a Google Play distribution method.
 - The Android Auto node map is not an in-motion driver interface.

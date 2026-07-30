@@ -8,6 +8,7 @@ import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
 import io.dualmesh.app.model.RadioChannel
 import io.dualmesh.app.model.RadioContact
+import io.dualmesh.app.model.TraceRouteResult
 import io.dualmesh.app.model.UnifiedMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -61,6 +62,11 @@ class MultiDeviceBackend(
 
     private val _incomingMessages = MutableSharedFlow<UnifiedMessage>(extraBufferCapacity = 128)
     override val incomingMessages: SharedFlow<UnifiedMessage> = _incomingMessages.asSharedFlow()
+
+    private val _traceRouteResults =
+        MutableSharedFlow<TraceRouteResult>(extraBufferCapacity = 32)
+    override val traceRouteResults: SharedFlow<TraceRouteResult> =
+        _traceRouteResults.asSharedFlow()
 
     private val _connectedDeviceName = MutableStateFlow<String?>(null)
     override val connectedDeviceName: StateFlow<String?> = _connectedDeviceName.asStateFlow()
@@ -179,12 +185,20 @@ class MultiDeviceBackend(
         outboundBackend()?.sendDirectMessage(text, contactId)
             ?: Result.failure(IllegalStateException("No outbound ${network.label} device"))
 
+    override fun traceRoute(contactId: String): Result<Unit> =
+        outboundBackend()?.traceRoute(contactId)
+            ?: Result.failure(IllegalStateException("No outbound ${network.label} device"))
+
     fun sendChannelMessage(deviceId: String, text: String, channel: Int): Result<Unit> =
         slots[deviceId]?.backend?.sendChannelMessage(text, channel)
             ?: Result.failure(IllegalStateException("${network.label} device is not connected"))
 
     fun sendDirectMessage(deviceId: String, text: String, contactId: String): Result<Unit> =
         slots[deviceId]?.backend?.sendDirectMessage(text, contactId)
+            ?: Result.failure(IllegalStateException("${network.label} device is not connected"))
+
+    fun traceRoute(deviceId: String, contactId: String): Result<Unit> =
+        slots[deviceId]?.backend?.traceRoute(contactId)
             ?: Result.failure(IllegalStateException("${network.label} device is not connected"))
 
     private fun createBackend(profile: ConnectionProfileStore.Profile): MessagingBackend {
@@ -202,6 +216,16 @@ class MultiDeviceBackend(
             .onEach { message ->
                 _incomingMessages.emit(
                     message.copy(
+                        deviceId = id,
+                        deviceName = slot.profile.name,
+                    ),
+                )
+            }
+            .launchIn(scope)
+        slot.observers += slot.backend.traceRouteResults
+            .onEach { result ->
+                _traceRouteResults.emit(
+                    result.copy(
                         deviceId = id,
                         deviceName = slot.profile.name,
                     ),

@@ -75,9 +75,13 @@ import io.dualmesh.app.model.MeshNode
 import io.dualmesh.app.model.RadioChannel
 import io.dualmesh.app.model.RadioDevice
 import io.dualmesh.app.model.RadioContact
+import io.dualmesh.app.model.TraceRouteHop
+import io.dualmesh.app.model.TraceRouteResult
+import io.dualmesh.app.model.TraceRouteState
 import io.dualmesh.app.model.UnifiedMessage
 import java.text.DateFormat
 import java.util.Date
+import java.util.Locale
 import org.maplibre.android.annotations.MarkerOptions
 import org.maplibre.android.annotations.IconFactory
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -755,6 +759,7 @@ private fun NetworkPane(
     modifier: Modifier = Modifier,
 ) {
     val manager = viewModel.manager
+    val traceRouteResults by manager.traceRouteResults.collectAsStateWithLifecycle()
     val selectedDeviceConnection = deviceConnections.firstOrNull {
         MultiDeviceBackend.targetId(it.profile) == selectedDeviceId
     }
@@ -872,6 +877,13 @@ private fun NetworkPane(
             network = network,
             radioName = selectedDeviceConnection?.profile?.name ?: network.label,
             nodes = radioNodes,
+            connected = selectedDeviceState == ConnectionState.CONNECTED,
+            traceResults = traceRouteResults.filter {
+                it.network == network && it.deviceId == selectedDeviceId
+            },
+            onTrace = { node ->
+                manager.traceRoute(network, node.deviceId, node.id)
+            },
             onDismiss = { showNodes = false },
         )
     }
@@ -1180,8 +1192,12 @@ private fun NodeMapDialog(
     network: MeshNetwork,
     radioName: String,
     nodes: List<MeshNode>,
+    connected: Boolean,
+    traceResults: List<TraceRouteResult>,
+    onTrace: (MeshNode) -> Result<Unit>,
     onDismiss: () -> Unit,
 ) {
+    var traceError by remember { mutableStateOf<String?>(null) }
     val positioned = nodes.filter { node ->
         node.latitude?.let { it in -90.0..90.0 } == true &&
             node.longitude?.let { it in -180.0..180.0 } == true
@@ -1245,6 +1261,14 @@ private fun NodeMapDialog(
                     modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                     style = MaterialTheme.typography.labelLarge,
                 )
+                traceError?.let { message ->
+                    Text(
+                        message,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1252,7 +1276,14 @@ private fun NodeMapDialog(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     items(nodes, key = { "${it.deviceId}:${it.id}" }) { node ->
-                        NodeDirectoryRow(node)
+                        NodeDirectoryRow(
+                            node = node,
+                            trace = traceResults.lastOrNull { it.targetId == node.id },
+                            traceEnabled = connected && node.messageable != false,
+                            onTrace = {
+                                traceError = onTrace(node).exceptionOrNull()?.message
+                            },
+                        )
                     }
                     if (nodes.isEmpty()) {
                         item {
@@ -1347,7 +1378,12 @@ private fun NodeMap(nodes: List<MeshNode>) {
 }
 
 @Composable
-private fun NodeDirectoryRow(node: MeshNode) {
+private fun NodeDirectoryRow(
+    node: MeshNode,
+    trace: TraceRouteResult?,
+    traceEnabled: Boolean,
+    onTrace: () -> Unit,
+) {
     Surface(
         color = GlassSurface,
         shape = RoundedCornerShape(16.dp),
@@ -1368,6 +1404,14 @@ private fun NodeDirectoryRow(node: MeshNode) {
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                     )
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = onTrace,
+                    enabled = traceEnabled && trace?.state != TraceRouteState.PENDING,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                ) {
+                    Text(if (trace?.state == TraceRouteState.PENDING) "Tracing" else "Trace")
                 }
             }
             Text(
@@ -1407,9 +1451,65 @@ private fun NodeDirectoryRow(node: MeshNode) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (trace != null) {
+                TraceRouteStatus(trace)
+            }
         }
     }
 }
+
+@Composable
+private fun TraceRouteStatus(trace: TraceRouteResult) {
+    val color = when (trace.state) {
+        TraceRouteState.PENDING -> WarningAmber
+        TraceRouteState.COMPLETE -> SignalGreen
+        TraceRouteState.TIMED_OUT,
+        TraceRouteState.ERROR,
+        -> MaterialTheme.colorScheme.error
+    }
+    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+    Text(
+        when (trace.state) {
+            TraceRouteState.PENDING -> "Trace in progress"
+            TraceRouteState.COMPLETE -> "Trace complete"
+            TraceRouteState.TIMED_OUT -> "Trace timed out"
+            TraceRouteState.ERROR -> "Trace failed"
+        },
+        style = MaterialTheme.typography.labelMedium,
+        color = color,
+        fontWeight = FontWeight.SemiBold,
+    )
+    if (trace.state == TraceRouteState.COMPLETE) {
+        if (trace.forward.isNotEmpty()) {
+            Text(
+                "Toward: ${formatTracePath(trace.forward)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (trace.returned.isNotEmpty()) {
+            Text(
+                "Return: ${formatTracePath(trace.returned)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    trace.detail?.let { detail ->
+        Text(
+            detail,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun formatTracePath(hops: List<TraceRouteHop>): String =
+    hops.joinToString(" -> ") { hop ->
+        hop.snr?.let {
+            "${hop.name} (${String.format(Locale.US, "%.1f", it)} dB)"
+        } ?: hop.name
+    }
 
 private fun nodeMapSnippet(node: MeshNode): String =
     buildList {

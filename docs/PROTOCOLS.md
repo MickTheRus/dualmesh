@@ -98,6 +98,17 @@ stops an unsupported request.
 - The app sends the next queue request after each queued message.
 - `PUSH_CODE_MSG_WAITING` also starts the next queue request.
 
+### Traceroute
+
+- `RESP_CODE_CONTACT` supplies the saved path, path length, and path-hash size.
+- `CMD_SEND_TRACE_PATH` starts a trace with a random tag.
+- `PUSH_CODE_TRACE_DATA` returns the same tag, path hashes, and SNR values.
+- The app supports 1-byte, 2-byte, and 4-byte trace hashes.
+- The app shortens a saved 3-byte path hash to 2 bytes because the trace flag does not define a
+  3-byte size.
+- The app correlates each result with its tag and the radio that sent it.
+- A 60-second timer marks an unanswered request as timed out.
+
 ## Meshtastic
 
 ### Transports
@@ -155,6 +166,16 @@ rule prevents data loss. An emoji without the reaction fields stays a normal mes
 
 Android Auto does not show a reaction as a separate car message. A phone notification identifies
 the sender and reaction.
+
+### Traceroute
+
+- The request uses `TRACEROUTE_APP`, `want_response`, and a random packet ID.
+- The request uses the channel index saved for the destination node.
+- A response uses `RouteDiscovery`.
+- `Data.request_id` correlates the response with the request.
+- Forward and return node numbers stay separate.
+- `snr_towards` and `snr_back` use quarter-dB units.
+- A 60-second timer marks an unanswered request as timed out.
 
 ### Nodes and positions
 
@@ -221,3 +242,6 @@ the app.
 
 The private SQLite index has a size limit. The JSONL file continues until the user stops the log.
 Read [PACKET_LOGGING.md](PACKET_LOGGING.md).
+
+When packet logging is enabled, it records traceroute requests and responses at the same companion
+API boundary. The log can contain route hashes, node numbers, and signal data.

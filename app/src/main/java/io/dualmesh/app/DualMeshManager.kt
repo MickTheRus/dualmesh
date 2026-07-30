@@ -12,6 +12,7 @@ import io.dualmesh.app.logging.PacketLogger
 import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
 import io.dualmesh.app.model.RadioDevice
+import io.dualmesh.app.model.TraceRouteResult
 import io.dualmesh.app.model.UnifiedMessage
 import io.dualmesh.app.service.MeshConnectionService
 import kotlinx.coroutines.CompletableDeferred
@@ -70,6 +71,10 @@ class DualMeshManager(private val context: Context) {
     private val _nodes = MutableStateFlow<List<MeshNode>>(emptyList())
     val nodes: StateFlow<List<MeshNode>> = _nodes.asStateFlow()
 
+    private val _traceRouteResults = MutableStateFlow<List<TraceRouteResult>>(emptyList())
+    val traceRouteResults: StateFlow<List<TraceRouteResult>> =
+        _traceRouteResults.asStateFlow()
+
     private val _messageEvents = MutableSharedFlow<UnifiedMessage>(extraBufferCapacity = 64)
     val messageEvents: SharedFlow<UnifiedMessage> = _messageEvents.asSharedFlow()
 
@@ -118,6 +123,9 @@ class DualMeshManager(private val context: Context) {
                 .launchIn(scope)
             backend.nodes
                 .onEach(::persistNodes)
+                .launchIn(scope)
+            backend.traceRouteResults
+                .onEach(::updateTraceRoute)
                 .launchIn(scope)
         }
     }
@@ -280,6 +288,9 @@ class DualMeshManager(private val context: Context) {
 
     fun maxMessageBytes(network: MeshNetwork): Int = backends.getValue(network).maxMessageBytes
 
+    fun traceRoute(network: MeshNetwork, deviceId: String, contactId: String): Result<Unit> =
+        backends.getValue(network).traceRoute(deviceId, contactId)
+
     fun conversationName(network: MeshNetwork, conversationId: String): String =
         when {
             conversationId.startsWith("channel:") -> {
@@ -360,6 +371,18 @@ class DualMeshManager(private val context: Context) {
             .values
             .sortedBy(UnifiedMessage::timestampMillis)
             .takeLast(MessageHistoryStore.MAX_STORED_MESSAGES)
+
+    private fun updateTraceRoute(result: TraceRouteResult) {
+        _traceRouteResults.value = (
+            _traceRouteResults.value.filterNot {
+                it.network == result.network &&
+                    it.deviceId == result.deviceId &&
+                    it.id == result.id
+            } + result
+            )
+            .sortedBy(TraceRouteResult::startedAtMillis)
+            .takeLast(MAX_TRACE_RESULTS)
+    }
 
     private suspend fun persistNodes(incoming: List<MeshNode>) {
         if (incoming.isEmpty()) return
@@ -484,5 +507,6 @@ class DualMeshManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DualMeshManager"
+        private const val MAX_TRACE_RESULTS = 100
     }
 }

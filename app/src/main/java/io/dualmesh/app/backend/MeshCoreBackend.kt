@@ -13,6 +13,9 @@ import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
 import io.dualmesh.app.model.RadioChannel
 import io.dualmesh.app.model.RadioContact
+import io.dualmesh.app.model.TraceRouteHop
+import io.dualmesh.app.model.TraceRouteResult
+import io.dualmesh.app.model.TraceRouteState
 import io.dualmesh.app.model.UnifiedMessage
 import io.dualmesh.app.protocol.MeshCoreProtocol
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
+import kotlin.random.Random
 
 class MeshCoreBackend(
     context: Context,
@@ -36,6 +40,11 @@ class MeshCoreBackend(
 
     private val _incomingMessages = MutableSharedFlow<UnifiedMessage>(extraBufferCapacity = 64)
     override val incomingMessages: SharedFlow<UnifiedMessage> = _incomingMessages.asSharedFlow()
+
+    private val _traceRouteResults =
+        MutableSharedFlow<TraceRouteResult>(extraBufferCapacity = 16)
+    override val traceRouteResults: SharedFlow<TraceRouteResult> =
+        _traceRouteResults.asSharedFlow()
 
     private val _connectedDeviceName = MutableStateFlow<String?>(null)
     override val connectedDeviceName: StateFlow<String?> = _connectedDeviceName.asStateFlow()
@@ -81,9 +90,17 @@ class MeshCoreBackend(
     private var channelSlotCount = MeshCoreProtocol.MAX_CHANNELS
     private var waitingForSetTime = false
     private var waitingForContacts = false
+    private val contactDetails = mutableMapOf<String, MeshCoreProtocol.ContactInfo>()
+    private val pendingTraces = mutableMapOf<UInt, PendingTrace>()
+
+    private data class PendingTrace(
+        val result: TraceRouteResult,
+        val forwardCount: Int,
+    )
 
     override fun connect(address: String, name: String) {
         clearStartupCallbacks()
+        failPendingTraces("A new MeshCore connection started.")
         waitingForDeviceInfo = false
         channelScanIndex = null
         channelSlotCount = MeshCoreProtocol.MAX_CHANNELS
@@ -93,6 +110,7 @@ class MeshCoreBackend(
         _channels.value = listOf(RadioChannel(0, "Public"))
         _contacts.value = emptyList()
         _nodes.value = emptyList()
+        contactDetails.clear()
         _selectedChannel.value = 0
         _connectedDeviceName.value = name
         session.connect(address)
@@ -101,6 +119,7 @@ class MeshCoreBackend(
     override fun disconnect() {
         clearHandshakeTimeout()
         clearStartupCallbacks()
+        failPendingTraces("The MeshCore radio disconnected.")
         session.disconnect()
         _connectedDeviceName.value = null
         _connectionState.value = ConnectionState.DISCONNECTED
@@ -183,6 +202,87 @@ class MeshCoreBackend(
         return Result.success(Unit)
     }
 
+    override fun traceRoute(contactId: String): Result<Unit> {
+        if (_connectionState.value != ConnectionState.CONNECTED) {
+            return Result.failure(IllegalStateException("MeshCore radio is not ready"))
+        }
+        val normalizedId = contactId.lowercase()
+        val contact = contactDetails[normalizedId]
+            ?: contactDetails.values.singleOrNull { it.publicKey.startsWith(normalizedId) }
+            ?: return Result.failure(
+                IllegalArgumentException("MeshCore contact path is not available"),
+            )
+        if (contact.outPathHashSize == 0) {
+            return Result.failure(
+                IllegalStateException("MeshCore has no stored direct path for this contact"),
+            )
+        }
+        val traceHashSize = if (contact.outPathHashSize == 3) 2 else contact.outPathHashSize
+        val rawStoredPath = contact.outPath.map { it.take(traceHashSize * 2) }
+        val storedPath = if (contact.outPathHashSize == 3) {
+            rawStoredPath.asReversed()
+        } else {
+            rawStoredPath
+        }
+        val traceEndsAtContact = contact.type == 2 || contact.type == 3
+        var tracePath = if (traceEndsAtContact) {
+            listOf(contact.publicKey.take(traceHashSize * 2))
+        } else {
+            emptyList()
+        }
+        storedPath.asReversed().forEach { hash ->
+            tracePath = if (tracePath.isEmpty()) {
+                listOf(hash)
+            } else {
+                listOf(hash) + tracePath + hash
+            }
+        }
+        if (tracePath.isEmpty()) {
+            return Result.failure(
+                IllegalStateException("This contact has no repeater path to trace"),
+            )
+        }
+        val tag = generateSequence { Random.nextInt(1, Int.MAX_VALUE).toUInt() }
+            .first { it !in pendingTraces }
+        val frame = runCatching {
+            MeshCoreProtocol.traceRequest(tag, tracePath, traceHashSize)
+        }.getOrElse { return Result.failure(it) }
+        val result = TraceRouteResult(
+            id = tag.toString(),
+            network = network,
+            targetId = contact.publicKey,
+            targetName = contact.name,
+            state = TraceRouteState.PENDING,
+            startedAtMillis = System.currentTimeMillis(),
+            detail = if (traceEndsAtContact) {
+                "Tracing the stored repeater path to this MeshCore service and back."
+            } else {
+                "Tracing the stored repeater path. MeshCore chat endpoints are not trace hops."
+            },
+        )
+        pendingTraces[tag] = PendingTrace(
+            result = result,
+            forwardCount = storedPath.size + if (traceEndsAtContact) 1 else 0,
+        )
+        _traceRouteResults.tryEmit(result)
+        writeFrame(frame, "CMD_SEND_TRACE_PATH target=${normalizedId.take(12)} tag=$tag")
+        mainHandler.postDelayed(
+            {
+                pendingTraces.remove(tag)?.let { pending ->
+                    _traceRouteResults.tryEmit(
+                        pending.result.copy(
+                            state = TraceRouteState.TIMED_OUT,
+                            completedAtMillis = System.currentTimeMillis(),
+                            detail = "No trace response arrived before the timeout.",
+                        ),
+                    )
+                }
+            },
+            TRACE_TIMEOUT_MS,
+        )
+        return Result.success(Unit)
+    }
+
     override fun onConnecting() {
         _connectionState.value = ConnectionState.CONNECTING
     }
@@ -196,12 +296,14 @@ class MeshCoreBackend(
     override fun onDisconnected() {
         clearHandshakeTimeout()
         clearStartupCallbacks()
+        failPendingTraces("The MeshCore radio disconnected.")
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
     override fun onError(message: String) {
         clearHandshakeTimeout()
         clearStartupCallbacks()
+        failPendingTraces(message)
         _connectionState.value = ConnectionState.ERROR
     }
 
@@ -241,6 +343,7 @@ class MeshCoreBackend(
             advanceChannelScan(info.index + 1)
         }
         MeshCoreProtocol.parseContact(value)?.let { contact ->
+            contactDetails[contact.publicKey] = contact
             mainHandler.removeCallbacks(contactQueryTimeout)
             val updated = _contacts.value.filterNot { it.id == contact.publicKey } +
                 RadioContact(contact.publicKey, contact.name)
@@ -267,6 +370,7 @@ class MeshCoreBackend(
             MeshCoreProtocol.RESPONSE_CONTACTS_START -> {
                 waitingForContacts = true
                 _contacts.value = emptyList()
+                contactDetails.clear()
                 mainHandler.removeCallbacks(contactQueryTimeout)
                 mainHandler.postDelayed(contactQueryTimeout, CONTACT_SYNC_TIMEOUT_MS)
             }
@@ -288,6 +392,7 @@ class MeshCoreBackend(
                 waitingForContacts -> finishStartup()
             }
         }
+        MeshCoreProtocol.parseTraceData(value)?.let(::handleTraceData)
         if ((value[0].toInt() and 0xff) == RESPONSE_OK && waitingForSetTime) {
             waitingForSetTime = false
             writeFrame(MeshCoreProtocol.syncNextMessage(), "CMD_SYNC_NEXT_MESSAGE")
@@ -403,6 +508,7 @@ class MeshCoreBackend(
             MeshCoreProtocol.RESPONSE_CONTACT_MESSAGE_V3 -> "RESP_CONTACT_MESSAGE_V3"
             MeshCoreProtocol.RESPONSE_CHANNEL_MESSAGE_V3 -> "RESP_CHANNEL_MESSAGE_V3"
             MeshCoreProtocol.RESPONSE_CHANNEL_INFO -> "RESP_CHANNEL_INFO"
+            MeshCoreProtocol.PUSH_TRACE_DATA -> "PUSH_TRACE_DATA"
             PUSH_CONTACT_UPDATED -> "PUSH_CONTACT_UPDATED"
             PUSH_PATH_UPDATED -> "PUSH_PATH_UPDATED"
             MeshCoreProtocol.PUSH_MESSAGE_WAITING -> "PUSH_MESSAGE_WAITING"
@@ -442,10 +548,59 @@ class MeshCoreBackend(
         return message
     }
 
+    private fun handleTraceData(trace: MeshCoreProtocol.TraceData) {
+        val pending = pendingTraces.remove(trace.tag) ?: return
+        val hops = trace.hops.map { hop ->
+            TraceRouteHop(
+                id = hop.hash,
+                name = resolveTraceHash(hop.hash),
+                snr = hop.snr,
+            )
+        }
+        val forwardCount = pending.forwardCount.coerceAtMost(hops.size)
+        _traceRouteResults.tryEmit(
+            pending.result.copy(
+                state = TraceRouteState.COMPLETE,
+                forward = hops.take(forwardCount),
+                returned = hops.drop(forwardCount) + TraceRouteHop(
+                    id = "local",
+                    name = selfName ?: "This radio",
+                    snr = trace.finalSnr,
+                ),
+                completedAtMillis = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    private fun resolveTraceHash(hash: String): String {
+        val matches = contactDetails.values.filter { it.publicKey.startsWith(hash) }
+        return when (matches.size) {
+            0 -> hash
+            1 -> matches.first().name
+            else -> "$hash (${matches.size} matches)"
+        }
+    }
+
+    private fun failPendingTraces(detail: String) {
+        if (pendingTraces.isEmpty()) return
+        val completedAt = System.currentTimeMillis()
+        pendingTraces.values.forEach { pending ->
+            _traceRouteResults.tryEmit(
+                pending.result.copy(
+                    state = TraceRouteState.ERROR,
+                    completedAtMillis = completedAt,
+                    detail = detail,
+                ),
+            )
+        }
+        pendingTraces.clear()
+    }
+
     companion object {
         private const val HANDSHAKE_TIMEOUT_MS = 15_000L
         private const val COMMAND_TIMEOUT_MS = 2_000L
         private const val CONTACT_SYNC_TIMEOUT_MS = 4_000L
+        private const val TRACE_TIMEOUT_MS = 60_000L
         private const val RESPONSE_SELF_INFO = 5
         private const val RESPONSE_OK = 0
         private const val SELF_NAME_OFFSET = 58

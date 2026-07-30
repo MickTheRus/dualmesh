@@ -13,6 +13,9 @@ import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
 import io.dualmesh.app.model.RadioChannel
 import io.dualmesh.app.model.RadioContact
+import io.dualmesh.app.model.TraceRouteHop
+import io.dualmesh.app.model.TraceRouteResult
+import io.dualmesh.app.model.TraceRouteState
 import io.dualmesh.app.model.UnifiedMessage
 import io.dualmesh.app.protocol.textMetadata
 import io.dualmesh.app.transport.MeshtasticTcpSession
@@ -30,6 +33,7 @@ import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MeshPacket
 import org.meshtastic.proto.PortNum
 import org.meshtastic.proto.Position
+import org.meshtastic.proto.RouteDiscovery
 import org.meshtastic.proto.ToRadio
 import org.meshtastic.proto.User
 import java.util.UUID
@@ -51,6 +55,11 @@ class MeshtasticBackend(
 
     private val _incomingMessages = MutableSharedFlow<UnifiedMessage>(extraBufferCapacity = 64)
     override val incomingMessages: SharedFlow<UnifiedMessage> = _incomingMessages.asSharedFlow()
+
+    private val _traceRouteResults =
+        MutableSharedFlow<TraceRouteResult>(extraBufferCapacity = 16)
+    override val traceRouteResults: SharedFlow<TraceRouteResult> =
+        _traceRouteResults.asSharedFlow()
 
     private val _connectedDeviceName = MutableStateFlow<String?>(null)
     override val connectedDeviceName: StateFlow<String?> = _connectedDeviceName.asStateFlow()
@@ -84,6 +93,7 @@ class MeshtasticBackend(
     private var reading = false
     private var configReady = false
     private var configNonce = 1
+    private val pendingTraces = mutableMapOf<Int, TraceRouteResult>()
 
     override fun connect(address: String, name: String) {
         prepareConnection(Transport.BLE, name)
@@ -101,6 +111,7 @@ class MeshtasticBackend(
 
     private fun prepareConnection(transport: Transport, name: String) {
         clearHandshakeTimeout()
+        failPendingTraces("A new Meshtastic connection started.")
         myNodeNum = 0
         reading = false
         configReady = false
@@ -116,6 +127,7 @@ class MeshtasticBackend(
 
     override fun disconnect() {
         clearHandshakeTimeout()
+        failPendingTraces("The Meshtastic radio disconnected.")
         activeTransport = Transport.NONE
         session.disconnect()
         tcpSession.disconnect()
@@ -219,6 +231,73 @@ class MeshtasticBackend(
         return Result.success(Unit)
     }
 
+    override fun traceRoute(contactId: String): Result<Unit> {
+        if (_connectionState.value != ConnectionState.CONNECTED) {
+            return Result.failure(IllegalStateException("Meshtastic radio is not ready"))
+        }
+        val destination = parseNodeId(contactId)
+            ?: return Result.failure(IllegalArgumentException("Invalid Meshtastic node ID"))
+        if (destination == myNodeNum) {
+            return Result.failure(IllegalArgumentException("Cannot trace this radio to itself"))
+        }
+        val packetId = generateSequence { Random.nextInt(1, Int.MAX_VALUE) }
+            .first { it !in pendingTraces }
+        val target = _nodes.value.firstOrNull { parseNodeId(it.id) == destination }
+        val normalizedId = destination.toUInt().toString()
+        val result = TraceRouteResult(
+            id = packetId.toUInt().toString(),
+            network = network,
+            targetId = normalizedId,
+            targetName = target?.name ?: nodeLabel(destination),
+            state = TraceRouteState.PENDING,
+            startedAtMillis = System.currentTimeMillis(),
+            detail = "Waiting for the Meshtastic route discovery response.",
+        )
+        val data = Data(
+            portnum = PortNum.TRACEROUTE_APP,
+            want_response = true,
+            dest = destination,
+        )
+        val packet = MeshPacket(
+            from = myNodeNum,
+            to = destination,
+            channel = target?.channel ?: 0,
+            decoded = data,
+            id = packetId,
+            hop_limit = 3,
+            hop_start = 3,
+            want_ack = true,
+        )
+        pendingTraces[packetId] = result
+        _traceRouteResults.tryEmit(result)
+        if (!sendTransport(ToRadio(packet = packet).encode())) {
+            pendingTraces.remove(packetId)
+            _traceRouteResults.tryEmit(
+                result.copy(
+                    state = TraceRouteState.ERROR,
+                    completedAtMillis = System.currentTimeMillis(),
+                    detail = "Meshtastic transport is unavailable.",
+                ),
+            )
+            return Result.failure(IllegalStateException("Meshtastic transport is unavailable"))
+        }
+        mainHandler.postDelayed(
+            {
+                pendingTraces.remove(packetId)?.let { pending ->
+                    _traceRouteResults.tryEmit(
+                        pending.copy(
+                            state = TraceRouteState.TIMED_OUT,
+                            completedAtMillis = System.currentTimeMillis(),
+                            detail = "No trace response arrived before the timeout.",
+                        ),
+                    )
+                }
+            },
+            TRACE_TIMEOUT_MS,
+        )
+        return Result.success(Unit)
+    }
+
     override fun onConnecting() {
         if (activeTransport == Transport.BLE) {
             _connectionState.value = ConnectionState.CONNECTING
@@ -236,6 +315,7 @@ class MeshtasticBackend(
     override fun onDisconnected() {
         if (activeTransport != Transport.BLE) return
         clearHandshakeTimeout()
+        failPendingTraces("The Meshtastic radio disconnected.")
         reading = false
         configReady = false
         _connectionState.value = ConnectionState.DISCONNECTED
@@ -244,6 +324,7 @@ class MeshtasticBackend(
     override fun onError(message: String) {
         if (activeTransport != Transport.BLE) return
         clearHandshakeTimeout()
+        failPendingTraces(message)
         reading = false
         configReady = false
         _connectionState.value = ConnectionState.ERROR
@@ -349,6 +430,10 @@ class MeshtasticBackend(
             PortNum.NODEINFO_APP -> {
                 runCatching { User.ADAPTER.decode(decoded.payload) }
                     .onSuccess { user -> updateUser(packet, user) }
+                return
+            }
+            PortNum.TRACEROUTE_APP -> {
+                handleTraceRoute(packet, decoded)
                 return
             }
             PortNum.TEXT_MESSAGE_APP -> Unit
@@ -491,6 +576,64 @@ class MeshtasticBackend(
             .sortedBy { it.name.lowercase() }
     }
 
+    private fun handleTraceRoute(packet: MeshPacket, data: Data) {
+        if (data.want_response) return
+        val route = runCatching { RouteDiscovery.ADAPTER.decode(data.payload) }.getOrNull() ?: return
+        val requestId = data.request_id
+        val pending = pendingTraces.remove(requestId) ?: return
+        val destination = if (data.dest != 0) data.dest else packet.to
+        val source = if (data.source != 0) data.source else packet.from
+        val forwardNodes = listOf(destination) + route.route + source
+        val returnNodes = if (
+            (packet.hop_start > 0 || (data.bitfield ?: 0) != 0) &&
+            route.snr_back.isNotEmpty()
+        ) {
+            listOf(source) + route.route_back + destination
+        } else {
+            route.route_back
+        }
+        _traceRouteResults.tryEmit(
+            pending.copy(
+                state = TraceRouteState.COMPLETE,
+                forward = traceHops(forwardNodes, route.snr_towards),
+                returned = traceHops(returnNodes, route.snr_back),
+                completedAtMillis = System.currentTimeMillis(),
+                detail = if (returnNodes.isEmpty()) {
+                    "The radio returned only the route toward the destination."
+                } else {
+                    "The radio returned routes in both directions."
+                },
+            ),
+        )
+    }
+
+    private fun traceHops(nodeNumbers: List<Int>, snrValues: List<Int>): List<TraceRouteHop> {
+        val validSnr = snrValues.takeIf { it.size == nodeNumbers.size - 1 }
+        return nodeNumbers.mapIndexed { index, nodeNum ->
+            val id = nodeNum.toUInt().toString()
+            TraceRouteHop(
+                id = id,
+                name = _nodes.value.firstOrNull { it.id == id }?.name ?: nodeLabel(nodeNum),
+                snr = if (index == 0) null else validSnr?.get(index - 1)?.div(4f),
+            )
+        }
+    }
+
+    private fun failPendingTraces(detail: String) {
+        if (pendingTraces.isEmpty()) return
+        val completedAt = System.currentTimeMillis()
+        pendingTraces.values.forEach { pending ->
+            _traceRouteResults.tryEmit(
+                pending.copy(
+                    state = TraceRouteState.ERROR,
+                    completedAtMillis = completedAt,
+                    detail = detail,
+                ),
+            )
+        }
+        pendingTraces.clear()
+    }
+
     private fun packetTimeMillis(packet: MeshPacket): Long =
         packet.rx_time.toLong().and(0xffffffffL)
             .takeIf { it > 0 }
@@ -552,6 +695,7 @@ class MeshtasticBackend(
     override fun onTcpDisconnected() {
         if (activeTransport != Transport.TCP) return
         clearHandshakeTimeout()
+        failPendingTraces("The Meshtastic TCP connection closed.")
         configReady = false
         _connectionState.value = ConnectionState.DISCONNECTED
     }
@@ -559,6 +703,7 @@ class MeshtasticBackend(
     override fun onTcpError(message: String) {
         if (activeTransport != Transport.TCP) return
         clearHandshakeTimeout()
+        failPendingTraces(message)
         configReady = false
         _connectionState.value = ConnectionState.ERROR
     }
@@ -646,6 +791,7 @@ class MeshtasticBackend(
 
     companion object {
         private const val HANDSHAKE_TIMEOUT_MS = 20_000L
+        private const val TRACE_TIMEOUT_MS = 60_000L
         private const val NODELESS_CONFIG_ID = 69420
         private const val MAX_CHANNELS = 8
         private const val BROADCAST_NODE = -1

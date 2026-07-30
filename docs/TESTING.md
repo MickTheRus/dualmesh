@@ -17,6 +17,7 @@ The tests examine these functions:
 - MeshCore channel-message encoding.
 - MeshCore direct-message encoding.
 - MeshCore contact-list parsing.
+- MeshCore trace request encoding and multi-byte trace response parsing.
 - MeshCore legacy and version 3 message parsing.
 - MeshCore channel and device capacity.
 - Stable message IDs.
@@ -75,6 +76,27 @@ app/build/reports/lint-results-debug.sarif
 
 WARNING: A message on a real mesh channel is public to that channel. Use a test channel. Tell other
 channel users before you transmit test data.
+
+## Traceroute test
+
+Use a private test mesh or coordinate the test with its users. A traceroute uses RF airtime.
+
+1. Select one connected radio.
+2. Open **Nodes / Map**.
+3. Select **Trace** on one remote node.
+4. Make sure that the row shows `Trace in progress`.
+5. Make sure that a response changes the state to `Trace complete`.
+6. Examine the forward route, return route, node names, and SNR values.
+7. Select another connected radio for the same technology.
+8. Run a trace and make sure that the result stays with that radio.
+9. Disconnect a radio during a trace and make sure that the row shows `Trace failed`.
+10. For Meshtastic, compare the result with the official app.
+11. For MeshCore, test a repeater or room contact with a stored direct path.
+12. For MeshCore, select a flood-only contact and make sure that the app rejects the request.
+13. Enable packet logging and run one trace.
+14. Make sure that the JSONL file contains the request and response summaries.
+
+Do not use repeated traceroutes as a load test on a shared mesh.
 
 ## Packet-log test
 
