@@ -124,6 +124,11 @@ It runs the unit tests and Android lint. It builds these artifacts:
 Open a completed workflow run in GitHub. Download the applicable artifact from the **Artifacts**
 section. GitHub keeps each artifact for 30 days.
 
+A successful `main` build also updates the
+[Development build](https://github.com/logans-stuff/dualmesh/releases/tag/development) prerelease.
+This prerelease contains the installable debug APK and its SHA-256 checksum. The APK uses Android
+debug signing. It is not a production release.
+
 ## Documents
 
 - [Visual design](docs/DESIGN.md)

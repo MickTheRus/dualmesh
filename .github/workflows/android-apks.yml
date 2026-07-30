@@ -80,3 +80,64 @@ jobs:
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 30
+
+  release:
+    name: Update development release
+    needs: build
+    if: >
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download debug APK
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dualmesh-debug-${{ github.run_number }}
+          path: release
+
+      - name: Prepare release files
+        run: |
+          mv release/app-debug.apk release/dualmesh-development-debug.apk
+          (
+            cd release
+            sha256sum dualmesh-development-debug.apk > SHA256SUMS.txt
+          )
+          {
+            printf 'Automated development build from commit %s.\n\n' "$GITHUB_SHA"
+            printf 'This APK uses Android debug signing. It is not a production release.\n\n'
+            printf 'Build: https://github.com/%s/actions/runs/%s\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > release-notes.md
+
+      - name: Publish development release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view development > /dev/null 2>&1; then
+            gh api \
+              --method PATCH \
+              "repos/$GITHUB_REPOSITORY/git/refs/tags/development" \
+              -f sha="$GITHUB_SHA" \
+              -F force=true > /dev/null
+            gh release edit development \
+              --title "DualMesh development build" \
+              --notes-file release-notes.md \
+              --prerelease
+            gh release upload development \
+              release/dualmesh-development-debug.apk \
+              release/SHA256SUMS.txt \
+              --clobber
+          else
+            gh release create development \
+              release/dualmesh-development-debug.apk \
+              release/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --latest=false \
+              --title "DualMesh development build" \
+              --notes-file release-notes.md
+          fi
