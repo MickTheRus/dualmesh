@@ -1,0 +1,51 @@
+# Gradle and Kotlin caches
+.gradle/
+.kotlin/
+build/
+**/build/
+
+# Android Studio and local SDK paths
+.idea/
+*.iml
+local.properties
+
+# Native/intermediate tooling
+.cxx/
+.externalNativeBuild/
+captures/
+
+# Build products and reports
+*.apk
+*.aab
+*.ap_
+*.dex
+*.hprof
+lint-results*.html
+lint-results*.xml
+lint-results*.sarif
+
+# Signing material and local secrets
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+keystore.properties
+secrets.properties
+google-services.json
+.env
+.env.*
+
+# Runtime data and packet captures
+*.db
+*.db-shm
+*.db-wal
+*.jsonl
+*.log
+
+# Operating-system/editor debris
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo

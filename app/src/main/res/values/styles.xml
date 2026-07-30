@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.DualMesh.Base" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#040818</item>
+        <item name="android:navigationBarColor">#02050E</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="Theme.DualMesh" parent="Theme.DualMesh.Base" />
+</resources>
