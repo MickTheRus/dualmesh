@@ -1,5 +1,7 @@
 # DualMesh
 
+[![Android APKs](https://github.com/logans-stuff/dualmesh/actions/workflows/android-apks.yml/badge.svg)](https://github.com/logans-stuff/dualmesh/actions/workflows/android-apks.yml)
+
 DualMesh is an experimental Android message app. It connects to MeshCore companion radios and
 Meshtastic nodes.
 
