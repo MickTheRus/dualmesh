@@ -132,12 +132,14 @@ jobs:
               release/SHA256SUMS.txt \
               --clobber
           else
-            gh release create development \
+            if ! release_output=$(gh release create development \
               release/dualmesh-development-debug.apk \
               release/SHA256SUMS.txt \
               --target "$GITHUB_SHA" \
               --prerelease \
-              --latest=false \
               --title "DualMesh development build" \
-              --notes-file release-notes.md
+              --notes-file release-notes.md 2>&1); then
+              printf '::error title=Release creation failed::%s\n' "$release_output"
+              exit 1
+            fi
           fi
