@@ -115,6 +115,7 @@ jobs:
 
       - name: Publish development release
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view development > /dev/null 2>&1; then
