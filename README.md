@@ -110,6 +110,18 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 A MeshCore radio must use companion firmware. A Meshtastic radio must supply its BLE service or
 its TCP Stream API.
 
+### GitHub Actions
+
+The `Android APKs` workflow runs for changes to `main`, pull requests to `main`, and manual runs.
+It runs the unit tests and Android lint. It builds these artifacts:
+
+- an installable debug APK
+- an unsigned release APK
+- an Android lint report.
+
+Open a completed workflow run in GitHub. Download the applicable artifact from the **Artifacts**
+section. GitHub keeps each artifact for 30 days.
+
 ## Documents
 
 - [Visual design](docs/DESIGN.md)
