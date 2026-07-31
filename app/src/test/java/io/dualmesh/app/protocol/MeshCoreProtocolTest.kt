@@ -105,6 +105,48 @@ class MeshCoreProtocolTest {
     }
 
     @Test
+    fun directContactBuildsAZeroHopRoundTripTrace() {
+        val contact = MeshCoreProtocol.ContactInfo(
+            publicKey = "aabbccdd".padEnd(64, '0'),
+            name = "Direct contact",
+            type = 1,
+            flags = 0,
+            outPathHashSize = 0,
+            outPath = emptyList(),
+            lastAdvertMillis = 0,
+            latitude = null,
+            longitude = null,
+        )
+
+        val path = MeshCoreProtocol.tracePath(contact)
+
+        assertEquals(1, path.hashSize)
+        assertEquals(listOf("aa"), path.hashes)
+        assertEquals(1, path.forwardCount)
+    }
+
+    @Test
+    fun routedContactBuildsAPathToTheContactAndBack() {
+        val contact = MeshCoreProtocol.ContactInfo(
+            publicKey = "ccdd".padEnd(64, '0'),
+            name = "Routed contact",
+            type = 1,
+            flags = 0,
+            outPathHashSize = 1,
+            outPath = listOf("aa", "bb"),
+            lastAdvertMillis = 0,
+            latitude = null,
+            longitude = null,
+        )
+
+        val path = MeshCoreProtocol.tracePath(contact)
+
+        assertEquals(1, path.hashSize)
+        assertEquals(listOf("aa", "bb", "cc", "bb", "aa"), path.hashes)
+        assertEquals(3, path.forwardCount)
+    }
+
+    @Test
     fun parsesMultiByteTraceResponse() {
         val frame = byteArrayOf(
             MeshCoreProtocol.PUSH_TRACE_DATA.toByte(),

@@ -87,8 +87,13 @@ The panel shows:
 - the count of nodes with positions
 - a MapLibre and OpenStreetMap map
 - one marker for each positioned node
+- a search field for the selected radio
 - node identity and radio data
 - a **Trace** control for each available remote node.
+
+Search by node name, short name, ID, public key, role, hardware, hop count, or source. Use
+`channel 2` or `ch 2` to find nodes on a channel. The result count changes as you type. The
+**Trace** control stays next to each result.
 
 Phones can use the Focused or Stacked layout. Tablets show both network panes. The map always uses
 the radio that is selected in its network pane.
@@ -104,7 +109,17 @@ connected radio, even when that radio can see the same node. Select **Nodes / Ma
 
 The node row shows the request state, the route toward the destination, the return route when the
 protocol supplies one, and the SNR for each available link. A request times out after 60 seconds.
-The app keeps recent results in memory. It does not save them in the node database.
+The **History** control shows older results for that node.
+
+The app saves the newest 1,000 results in this private SQLite file:
+
+```text
+dualmesh_traceroutes.db
+```
+
+Each result keeps its network, radio, target, state, times, forward hops, return hops, node labels,
+and SNR values. An unfinished request becomes a failed result after an app restart because the old
+transport session cannot deliver its response to the new process.
 
 Meshtastic uses `TRACEROUTE_APP` and `RouteDiscovery`. Results use Meshtastic node numbers. DualMesh
 uses the selected radio node database to replace known numbers with names.
@@ -113,10 +128,10 @@ MeshCore uses `CMD_SEND_TRACE_PATH` and `PUSH_CODE_TRACE_DATA`. Results contain 
 hashes. DualMesh replaces a hash with a contact name only when that hash has one match in the
 selected radio contact list. It shows the hash and match count when a prefix is not unique.
 
-A MeshCore trace follows the direct path that the companion stored for the contact. A repeater or
-room contact can be the center of the trace. A chat contact is not a trace hop, so its trace tests
-the stored repeater path only. A flood-only contact has no stored direct path and cannot start a
-trace.
+A MeshCore trace always uses the selected contact as its turn-around hop. When the contact has no
+saved path, DualMesh sends a direct trace to that contact and back. When the contact has a saved
+path, DualMesh follows that path to the contact and mirrors the path for the return. A repeater,
+room, or chat contact can be the selected target.
 
 The trace request is direct protocol traffic. It does not send a text message to a channel.
 However, it does use RF airtime. Do not run repeated traces on a busy mesh.

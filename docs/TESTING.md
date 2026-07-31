@@ -18,6 +18,7 @@ The tests examine these functions:
 - MeshCore direct-message encoding.
 - MeshCore contact-list parsing.
 - MeshCore trace request encoding and multi-byte trace response parsing.
+- Device-side traceroute database save, update, load, and interrupted-run handling.
 - MeshCore legacy and version 3 message parsing.
 - MeshCore channel and device capacity.
 - Stable message IDs.
@@ -37,6 +38,11 @@ The lint task creates these files:
 app/build/reports/lint-results-debug.html
 app/build/reports/lint-results-debug.sarif
 ```
+
+Do not run `connectedDebugAndroidTest` on a phone that contains the user's DualMesh data. The
+Android test task can uninstall the debug application after the test and erase its private
+databases. Use a disposable emulator or test phone for instrumented tests. Use `adb install -r`
+when replacing an APK on a phone whose local history must remain.
 
 ## Phone test
 
@@ -91,10 +97,15 @@ Use a private test mesh or coordinate the test with its users. A traceroute uses
 8. Run a trace and make sure that the result stays with that radio.
 9. Disconnect a radio during a trace and make sure that the row shows `Trace failed`.
 10. For Meshtastic, compare the result with the official app.
-11. For MeshCore, test a repeater or room contact with a stored direct path.
-12. For MeshCore, select a flood-only contact and make sure that the app rejects the request.
+11. For MeshCore, test a contact with no saved repeater path and make sure that a direct trace is
+    sent to that contact.
+12. For MeshCore, test a repeater or room contact with a saved multi-hop path.
 13. Enable packet logging and run one trace.
 14. Make sure that the JSONL file contains the request and response summaries.
+15. Stop and restart the app.
+16. Open the same node and make sure that **History** contains the saved result.
+17. Start a trace, stop the app before the response, and restart it.
+18. Make sure that the interrupted trace is stored as failed.
 
 Do not use repeated traceroutes as a load test on a shared mesh.
 

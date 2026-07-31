@@ -96,16 +96,12 @@ class BleRadioScanner(private val context: Context) {
         if (!hasConnectPermission()) return
         bluetoothManager.adapter?.bondedDevices.orEmpty().forEach { device ->
             val services = device.uuids.orEmpty().map { it.uuid }
-            val network = when {
-                MESHCORE_SERVICE in services -> MeshNetwork.MESHCORE
-                MESHTASTIC_SERVICE in services -> MeshNetwork.MESHTASTIC
-                else -> return@forEach
-            }
+            val name = device.name
+            val network = classifyBondedRadio(name, services) ?: return@forEach
             val address = device.address
-            val name = device.name ?: "${network.label} ${address.takeLast(5)}"
             _devices.value = _devices.value + RadioDevice(
                 address = address,
-                name = name,
+                name = name ?: "${network.label} ${address.takeLast(5)}",
                 network = network,
                 rssi = BONDED_DEVICE_RSSI,
             )
@@ -133,5 +129,16 @@ class BleRadioScanner(private val context: Context) {
         private const val SCAN_TIMEOUT_MS = 15_000L
         val MESHCORE_SERVICE: UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         val MESHTASTIC_SERVICE: UUID = UUID.fromString("6ba1b218-15a8-461f-9fa8-5dcae273eafd")
+
+        internal fun classifyBondedRadio(
+            name: String?,
+            services: Collection<UUID>,
+        ): MeshNetwork? = when {
+            MESHCORE_SERVICE in services -> MeshNetwork.MESHCORE
+            MESHTASTIC_SERVICE in services -> MeshNetwork.MESHTASTIC
+            name?.contains("meshcore", ignoreCase = true) == true -> MeshNetwork.MESHCORE
+            name?.startsWith("meshtastic", ignoreCase = true) == true -> MeshNetwork.MESHTASTIC
+            else -> null
+        }
     }
 }

@@ -55,6 +55,12 @@ object MeshCoreProtocol {
         val snr: Float,
     )
 
+    data class TracePath(
+        val hashSize: Int,
+        val hashes: List<String>,
+        val forwardCount: Int,
+    )
+
     fun deviceQuery(): ByteArray = byteArrayOf(0x16, 0x03)
 
     fun appStart(appName: String = "DualMesh"): ByteArray =
@@ -140,6 +146,33 @@ object MeshCoreProtocol {
             write(flags)
             path.forEach(::write)
         }.toByteArray()
+    }
+
+    /**
+     * Build a round-trip trace through the contact's stored outbound path.
+     * The contact hash is always the turn-around hop, including for a direct contact.
+     */
+    fun tracePath(contact: ContactInfo): TracePath {
+        val hashSize = when (contact.outPathHashSize) {
+            0 -> 1
+            3 -> 2
+            1, 2, 4, 8 -> contact.outPathHashSize
+            else -> throw IllegalArgumentException(
+                "MeshCore contact uses an unsupported path hash size",
+            )
+        }
+        val storedPath = contact.outPath
+            .map { it.take(hashSize * 2) }
+            .let { if (contact.outPathHashSize == 3) it.asReversed() else it }
+        var hashes = listOf(contact.publicKey.take(hashSize * 2))
+        storedPath.asReversed().forEach { hash ->
+            hashes = listOf(hash) + hashes + hash
+        }
+        return TracePath(
+            hashSize = hashSize,
+            hashes = hashes,
+            forwardCount = storedPath.size + 1,
+        )
     }
 
     fun parseMessage(frame: ByteArray, nowMillis: Long = System.currentTimeMillis()): UnifiedMessage? {

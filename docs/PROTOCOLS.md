@@ -56,6 +56,7 @@ The key keeps equal channel numbers on different radios separate.
 | Meshtastic text metadata | `protocol/MeshtasticTextMetadata.kt` |
 | Message database | `history/MessageHistoryStore.kt` |
 | Node database | `history/NodeHistoryStore.kt` |
+| Traceroute database | `history/TraceRouteHistoryStore.kt` |
 | Packet logs | `logging/PacketLogger.kt` |
 | Android Auto messages | `car/DualMeshCarAppService.kt` |
 | Android Auto map | `car/CarNodeMap.kt` |
@@ -103,6 +104,9 @@ stops an unsupported request.
 - `RESP_CODE_CONTACT` supplies the saved path, path length, and path-hash size.
 - `CMD_SEND_TRACE_PATH` starts a trace with a random tag.
 - `PUSH_CODE_TRACE_DATA` returns the same tag, path hashes, and SNR values.
+- A contact with no saved path uses the first byte of its public-key hash as the direct trace path.
+- A contact with a saved path adds the contact hash as the turn-around hop and mirrors the saved
+  path for the return.
 - The app supports 1-byte, 2-byte, and 4-byte trace hashes.
 - The app shortens a saved 3-byte path hash to 2 bytes because the trace flag does not define a
   3-byte size.
@@ -228,6 +232,18 @@ message notification.
 
 It stores the latest node data and a maximum of 20,000 position records. Different radios do not
 share node rows.
+
+## Traceroute storage
+
+`TraceRouteHistoryStore` saves the newest 1,000 traceroute results. The primary key is:
+
+```text
+(network, device_id, trace_id)
+```
+
+The `trace_runs` table stores request state and target data. The `trace_hops` table stores ordered
+forward and return hops with optional SNR values. The app replaces a pending row when its response,
+timeout, or connection error arrives. It changes pending rows to failed rows after an app restart.
 
 ## Packet-log limit
 

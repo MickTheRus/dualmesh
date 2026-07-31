@@ -212,40 +212,12 @@ class MeshCoreBackend(
             ?: return Result.failure(
                 IllegalArgumentException("MeshCore contact path is not available"),
             )
-        if (contact.outPathHashSize == 0) {
-            return Result.failure(
-                IllegalStateException("MeshCore has no stored direct path for this contact"),
-            )
-        }
-        val traceHashSize = if (contact.outPathHashSize == 3) 2 else contact.outPathHashSize
-        val rawStoredPath = contact.outPath.map { it.take(traceHashSize * 2) }
-        val storedPath = if (contact.outPathHashSize == 3) {
-            rawStoredPath.asReversed()
-        } else {
-            rawStoredPath
-        }
-        val traceEndsAtContact = contact.type == 2 || contact.type == 3
-        var tracePath = if (traceEndsAtContact) {
-            listOf(contact.publicKey.take(traceHashSize * 2))
-        } else {
-            emptyList()
-        }
-        storedPath.asReversed().forEach { hash ->
-            tracePath = if (tracePath.isEmpty()) {
-                listOf(hash)
-            } else {
-                listOf(hash) + tracePath + hash
-            }
-        }
-        if (tracePath.isEmpty()) {
-            return Result.failure(
-                IllegalStateException("This contact has no repeater path to trace"),
-            )
-        }
+        val tracePath = runCatching { MeshCoreProtocol.tracePath(contact) }
+            .getOrElse { return Result.failure(it) }
         val tag = generateSequence { Random.nextInt(1, Int.MAX_VALUE).toUInt() }
             .first { it !in pendingTraces }
         val frame = runCatching {
-            MeshCoreProtocol.traceRequest(tag, tracePath, traceHashSize)
+            MeshCoreProtocol.traceRequest(tag, tracePath.hashes, tracePath.hashSize)
         }.getOrElse { return Result.failure(it) }
         val result = TraceRouteResult(
             id = tag.toString(),
@@ -254,15 +226,15 @@ class MeshCoreBackend(
             targetName = contact.name,
             state = TraceRouteState.PENDING,
             startedAtMillis = System.currentTimeMillis(),
-            detail = if (traceEndsAtContact) {
-                "Tracing the stored repeater path to this MeshCore service and back."
+            detail = if (contact.outPath.isEmpty()) {
+                "Tracing this MeshCore contact directly and back."
             } else {
-                "Tracing the stored repeater path. MeshCore chat endpoints are not trace hops."
+                "Tracing the stored path to this MeshCore contact and back."
             },
         )
         pendingTraces[tag] = PendingTrace(
             result = result,
-            forwardCount = storedPath.size + if (traceEndsAtContact) 1 else 0,
+            forwardCount = tracePath.forwardCount,
         )
         _traceRouteResults.tryEmit(result)
         writeFrame(frame, "CMD_SEND_TRACE_PATH target=${normalizedId.take(12)} tag=$tag")

@@ -8,6 +8,8 @@ import io.dualmesh.app.ble.BleRadioScanner
 import io.dualmesh.app.connection.ConnectionProfileStore
 import io.dualmesh.app.history.MessageHistoryStore
 import io.dualmesh.app.history.NodeHistoryStore
+import io.dualmesh.app.history.TraceRouteHistoryStore
+import io.dualmesh.app.history.resolveReactionConversation
 import io.dualmesh.app.logging.PacketLogger
 import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
@@ -56,10 +58,13 @@ class DualMeshManager(private val context: Context) {
     private val profileStore = ConnectionProfileStore(context)
     private val messageStore = MessageHistoryStore(context)
     private val nodeStore = NodeHistoryStore(context)
+    private val traceStore = TraceRouteHistoryStore(context)
     private val historyReady = CompletableDeferred<Unit>()
     private val nodesReady = CompletableDeferred<Unit>()
+    private val tracesReady = CompletableDeferred<Unit>()
     private val historyMutex = Mutex()
     private val nodeMutex = Mutex()
+    private val traceMutex = Mutex()
     private var autoReconnectStarted = false
 
     private val _selectedNetwork = MutableStateFlow(profileStore.loadSelectedNetwork())
@@ -117,6 +122,16 @@ class DualMeshManager(private val context: Context) {
                 .getOrDefault(emptyList())
             nodesReady.complete(Unit)
         }
+        scope.launch {
+            val storedTraces = runCatching {
+                traceStore.markInterruptedRuns()
+                traceStore.loadResults()
+            }
+                .onFailure { Log.e(TAG, "Unable to load traceroute history", it) }
+                .getOrDefault(emptyList())
+            _traceRouteResults.value = mergeTraceRoutes(storedTraces, _traceRouteResults.value)
+            tracesReady.complete(Unit)
+        }
         backends.values.forEach { backend ->
             backend.incomingMessages
                 .onEach(::appendMessage)
@@ -125,7 +140,7 @@ class DualMeshManager(private val context: Context) {
                 .onEach(::persistNodes)
                 .launchIn(scope)
             backend.traceRouteResults
-                .onEach(::updateTraceRoute)
+                .onEach(::persistTraceRoute)
                 .launchIn(scope)
         }
     }
@@ -341,6 +356,7 @@ class DualMeshManager(private val context: Context) {
         scope.cancel()
         messageStore.close()
         nodeStore.close()
+        traceStore.close()
         packetLogger.close()
     }
 
@@ -348,16 +364,19 @@ class DualMeshManager(private val context: Context) {
         scope.launch {
             historyReady.await()
             historyMutex.withLock {
+                val resolvedMessage = resolveReactionConversation(message, _messages.value)
                 val newInMemory = _messages.value.none {
-                    it.network == message.network &&
-                        it.deviceId == message.deviceId &&
-                        it.id == message.id
+                    it.network == resolvedMessage.network &&
+                        it.deviceId == resolvedMessage.deviceId &&
+                        it.id == resolvedMessage.id
                 }
-                val newInDatabase = runCatching { messageStore.save(message) }
-                    .onFailure { Log.e(TAG, "Unable to save message ${message.id}", it) }
+                val newInDatabase = runCatching { messageStore.save(resolvedMessage) }
+                    .onFailure {
+                        Log.e(TAG, "Unable to save message ${resolvedMessage.id}", it)
+                    }
                     .getOrNull()
-                _messages.value = mergeMessages(_messages.value, listOf(message))
-                if (newInDatabase ?: newInMemory) _messageEvents.emit(message)
+                _messages.value = mergeMessages(_messages.value, listOf(resolvedMessage))
+                if (newInDatabase ?: newInMemory) _messageEvents.emit(resolvedMessage)
             }
         }
     }
@@ -372,17 +391,24 @@ class DualMeshManager(private val context: Context) {
             .sortedBy(UnifiedMessage::timestampMillis)
             .takeLast(MessageHistoryStore.MAX_STORED_MESSAGES)
 
-    private fun updateTraceRoute(result: TraceRouteResult) {
-        _traceRouteResults.value = (
-            _traceRouteResults.value.filterNot {
-                it.network == result.network &&
-                    it.deviceId == result.deviceId &&
-                    it.id == result.id
-            } + result
-            )
-            .sortedBy(TraceRouteResult::startedAtMillis)
-            .takeLast(MAX_TRACE_RESULTS)
+    private suspend fun persistTraceRoute(result: TraceRouteResult) {
+        tracesReady.await()
+        traceMutex.withLock {
+            runCatching { traceStore.save(result) }
+                .onFailure { Log.e(TAG, "Unable to save traceroute ${result.id}", it) }
+            _traceRouteResults.value = mergeTraceRoutes(_traceRouteResults.value, listOf(result))
+        }
     }
+
+    private fun mergeTraceRoutes(
+        first: List<TraceRouteResult>,
+        second: List<TraceRouteResult>,
+    ): List<TraceRouteResult> =
+        (first + second)
+            .associateBy { Triple(it.network, it.deviceId, it.id) }
+            .values
+            .sortedBy(TraceRouteResult::startedAtMillis)
+            .takeLast(TraceRouteHistoryStore.MAX_STORED_TRACES)
 
     private suspend fun persistNodes(incoming: List<MeshNode>) {
         if (incoming.isEmpty()) return
@@ -398,7 +424,11 @@ class DualMeshManager(private val context: Context) {
             }
             if (changed.isNotEmpty()) {
                 _nodes.value = current.values.sortedWith(
-                    compareBy<MeshNode>({ it.network.ordinal }, { it.deviceName }, { it.name }),
+                    compareBy<MeshNode>(
+                        { it.network.ordinal },
+                        { it.deviceName.lowercase() },
+                        { it.name.lowercase() },
+                    ),
                 )
                 runCatching { nodeStore.saveNodes(changed) }
                     .onFailure { Log.e(TAG, "Unable to persist node directory", it) }
@@ -507,6 +537,5 @@ class DualMeshManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DualMeshManager"
-        private const val MAX_TRACE_RESULTS = 100
     }
 }

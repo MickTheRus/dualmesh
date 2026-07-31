@@ -1198,6 +1198,9 @@ private fun NodeMapDialog(
     onDismiss: () -> Unit,
 ) {
     var traceError by remember { mutableStateOf<String?>(null) }
+    val searchKey = nodes.firstOrNull()?.deviceId ?: "$network:$radioName"
+    var nodeQuery by rememberSaveable(searchKey) { mutableStateOf("") }
+    val filteredNodes = remember(nodes, nodeQuery) { filterNodes(nodes, nodeQuery) }
     val positioned = nodes.filter { node ->
         node.latitude?.let { it in -90.0..90.0 } == true &&
             node.longitude?.let { it in -180.0..180.0 } == true
@@ -1256,10 +1259,39 @@ private fun NodeMapDialog(
                         }
                     }
                 }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = nodeQuery,
+                        onValueChange = { nodeQuery = it },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        label = { Text("Search nodes") },
+                        placeholder = { Text("Name, ID, role, hardware, or channel") },
+                    )
+                    if (nodeQuery.isNotBlank()) {
+                        TextButton(onClick = { nodeQuery = "" }) {
+                            Text("Clear")
+                        }
+                    }
+                }
                 Text(
-                    "Stored directory",
-                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                    if (nodeQuery.isBlank()) {
+                        "Stored directory · ${nodes.size} nodes"
+                    } else {
+                        "${filteredNodes.size} of ${nodes.size} nodes"
+                    },
+                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                     style = MaterialTheme.typography.labelLarge,
+                    color = if (nodeQuery.isBlank()) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        networkAccent(network)
+                    },
                 )
                 traceError?.let { message ->
                     Text(
@@ -1275,10 +1307,10 @@ private fun NodeMapDialog(
                         .weight(0.44f),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(nodes, key = { "${it.deviceId}:${it.id}" }) { node ->
+                    items(filteredNodes, key = { "${it.deviceId}:${it.id}" }) { node ->
                         NodeDirectoryRow(
                             node = node,
-                            trace = traceResults.lastOrNull { it.targetId == node.id },
+                            traces = traceResults.filter { it.targetId == node.id },
                             traceEnabled = connected && node.messageable != false,
                             onTrace = {
                                 traceError = onTrace(node).exceptionOrNull()?.message
@@ -1290,6 +1322,14 @@ private fun NodeMapDialog(
                             Text(
                                 "Node information will be retained after this radio supplies its " +
                                     "contact/node database or live adverts.",
+                                modifier = Modifier.padding(12.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else if (filteredNodes.isEmpty()) {
+                        item {
+                            Text(
+                                "No nodes match \"$nodeQuery\" on this radio.",
                                 modifier = Modifier.padding(12.dp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1380,10 +1420,14 @@ private fun NodeMap(nodes: List<MeshNode>) {
 @Composable
 private fun NodeDirectoryRow(
     node: MeshNode,
-    trace: TraceRouteResult?,
+    traces: List<TraceRouteResult>,
     traceEnabled: Boolean,
     onTrace: () -> Unit,
 ) {
+    val latestTrace = traces.lastOrNull()
+    var showTraceHistory by rememberSaveable(node.deviceId, node.id) {
+        mutableStateOf(false)
+    }
     Surface(
         color = GlassSurface,
         shape = RoundedCornerShape(16.dp),
@@ -1408,10 +1452,10 @@ private fun NodeDirectoryRow(
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(
                     onClick = onTrace,
-                    enabled = traceEnabled && trace?.state != TraceRouteState.PENDING,
+                    enabled = traceEnabled && latestTrace?.state != TraceRouteState.PENDING,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
                 ) {
-                    Text(if (trace?.state == TraceRouteState.PENDING) "Tracing" else "Trace")
+                    Text(if (latestTrace?.state == TraceRouteState.PENDING) "Tracing" else "Trace")
                 }
             }
             Text(
@@ -1451,8 +1495,43 @@ private fun NodeDirectoryRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (trace != null) {
-                TraceRouteStatus(trace)
+            if (latestTrace != null) {
+                TraceRouteStatus(latestTrace)
+            }
+            if (traces.size > 1) {
+                TextButton(onClick = { showTraceHistory = !showTraceHistory }) {
+                    Text(
+                        if (showTraceHistory) {
+                            "Hide history"
+                        } else {
+                            "History (${traces.size})"
+                        },
+                    )
+                }
+                if (showTraceHistory) {
+                    traces.asReversed()
+                        .drop(1)
+                        .take(MAX_VISIBLE_TRACE_HISTORY)
+                        .forEach { oldTrace ->
+                            Surface(
+                                modifier = Modifier.padding(top = 4.dp),
+                                color = Color(0x66101B31),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, GlassOutline.copy(alpha = 0.5f)),
+                            ) {
+                                Column(Modifier.fillMaxWidth().padding(8.dp)) {
+                                    TraceRouteStatus(oldTrace)
+                                }
+                            }
+                        }
+                    if (traces.size - 1 > MAX_VISIBLE_TRACE_HISTORY) {
+                        Text(
+                            "Showing the newest $MAX_VISIBLE_TRACE_HISTORY older traces.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }
@@ -1478,6 +1557,12 @@ private fun TraceRouteStatus(trace: TraceRouteResult) {
         style = MaterialTheme.typography.labelMedium,
         color = color,
         fontWeight = FontWeight.SemiBold,
+    )
+    Text(
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+            .format(Date(trace.startedAtMillis)),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (trace.state == TraceRouteState.COMPLETE) {
         if (trace.forward.isNotEmpty()) {
@@ -2067,6 +2152,7 @@ private fun networkAccent(network: MeshNetwork): Color = when (network) {
 private const val MAX_VISIBLE_CONTACT_RESULTS = 30
 private const val MAX_VISIBLE_CONNECTION_PROFILES = 6
 private const val MAX_VISIBLE_REACTIONS = 5
+private const val MAX_VISIBLE_TRACE_HISTORY = 25
 private val TABLET_TWO_PANE_WIDTH = 720.dp
 private const val LAYOUT_PREFERENCES_NAME = "layout_preferences"
 private const val KEY_PHONE_LAYOUT_MODE = "phone_layout_mode"

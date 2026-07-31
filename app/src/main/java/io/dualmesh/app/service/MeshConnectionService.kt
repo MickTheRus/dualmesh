@@ -18,7 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 
 class MeshConnectionService : Service() {
@@ -36,18 +38,25 @@ class MeshConnectionService : Service() {
             manager.meshtastic.deviceConnections,
             manager.reconnectTargets,
         ) { meshCore, meshtastic, targets -> Triple(meshCore, meshtastic, targets) }
-            .onEach { (meshCore, meshtastic, targets) ->
+            .map { (meshCore, meshtastic, targets) ->
                 val connections = meshCore + meshtastic
                 val active = connections.any {
                     it.state == ConnectionState.CONNECTING ||
                         it.state == ConnectionState.CONNECTED
                 }
-                if (!active && targets.isEmpty()) {
+                NotificationState(
+                    shouldStop = !active && targets.isEmpty(),
+                    text = statusText(connections.map { it.state }),
+                )
+            }
+            .distinctUntilChanged()
+            .onEach { state ->
+                if (state.shouldStop) {
                     stopSelf()
                 } else {
                     notificationManager.notify(
                         NOTIFICATION_ID,
-                        buildNotification(statusText(connections.map { it.state })),
+                        buildNotification(state.text),
                     )
                 }
             }
@@ -116,4 +125,9 @@ class MeshConnectionService : Service() {
             }
         }
     }
+
+    private data class NotificationState(
+        val shouldStop: Boolean,
+        val text: String,
+    )
 }
