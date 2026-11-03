@@ -46,6 +46,7 @@ jobs:
           ./gradlew --no-daemon
           testDebugUnitTest
           lintDebug
+          lintRelease
           assembleDebug
           assembleRelease
 
@@ -77,7 +78,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dualmesh-lint-${{ github.run_number }}
-          path: app/build/reports/lint-results-debug.html
+          path: app/build/reports/lint-results-*.html
           if-no-files-found: ignore
           retention-days: 30
 
@@ -144,3 +145,110 @@ jobs:
               exit 1
             fi
           fi
+
+  production:
+    name: Publish production release from merged source
+    needs: build
+    if: >
+      github.repository == 'logans-stuff/dualmesh' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out merged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check release version
+        id: version
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          version = subprocess.check_output(['python3', 'scripts/prepare-production-release.py', '--version-only'], text=True).strip()
+          result = subprocess.run(['gh', 'api', f'repos/{os.environ["GH_REPO"]}/releases/tags/v{version}'], capture_output=True, text=True)
+          publish = True
+          if result.returncode == 0:
+              release = json.loads(result.stdout)
+              publish = release['draft']
+              if publish and release['target_commitish'] != os.environ['GITHUB_SHA']:
+                  raise SystemExit('An existing draft targets a different commit; a maintainer must resolve it before retrying.')
+          elif '(HTTP 404)' not in result.stderr:
+              raise SystemExit(result.stderr)
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+              output.write(f'version={version}\npublish={str(publish).lower()}\n')
+          if not publish:
+              print(f'Production v{version} is already published; keeping its assets unchanged.')
+          PY
+
+      - name: Require production signing secrets
+        if: steps.version.outputs.publish == 'true'
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" ] || [ -z "$ANDROID_RELEASE_KEYSTORE_PASSWORD" ]; then
+            echo '::error::A repository maintainer must configure ANDROID_RELEASE_KEYSTORE_BASE64 and ANDROID_RELEASE_KEYSTORE_PASSWORD. See docs/PRODUCTION_RELEASES.md. No debug-signed production release will be published.'
+            exit 1
+          fi
+
+      - name: Set up Java 21
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Android signing tools
+        if: steps.version.outputs.publish == 'true'
+        run: >
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --channel=3
+          "build-tools;37.0.0"
+
+      - name: Download tested APK from this build
+        if: steps.version.outputs.publish == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dualmesh-release-unsigned-${{ github.run_number }}
+          path: unsigned
+
+      - name: Sign and verify production APK
+        if: steps.version.outputs.publish == 'true'
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: >
+          python3 scripts/prepare-production-release.py
+          --apk unsigned/app-release-unsigned.apk
+          --build-tools "$ANDROID_HOME/build-tools/37.0.0"
+          --output production
+
+      - name: Publish upstream production release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            printf 'Production APK built from merged commit %s.\n\n' "$GITHUB_SHA"
+            printf 'Requires Android 8.0 or newer. Signed with the dedicated production certificate; not Google Play published.\n\n'
+            printf '**Switching from 0.1.0 or debug builds requires reinstalling because the certificate changed. Uninstalling deletes local messages and preferences; save anything needed first.**\n\n'
+            printf 'The APK, public certificate, fingerprint, and SHA-256 checksums are attached. The app remains experimental.\n\n'
+            printf 'Build: https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } > production-notes.md
+          if ! gh release view "v$RELEASE_VERSION" > /dev/null 2>&1; then
+            gh release create "v$RELEASE_VERSION" --draft --target "$GITHUB_SHA" \
+              --title "DualMesh $RELEASE_VERSION" --notes-file production-notes.md
+          fi
+          gh release upload "v$RELEASE_VERSION" \
+            "production/dualmesh-$RELEASE_VERSION.apk" \
+            production/dualmesh-production-certificate.pem \
+            production/SIGNING-CERTIFICATE.txt production/SHA256SUMS.txt --clobber
+          gh release edit "v$RELEASE_VERSION" --notes-file production-notes.md --draft=false --latest
