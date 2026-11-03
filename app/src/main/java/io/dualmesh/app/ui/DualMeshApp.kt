@@ -71,7 +71,6 @@ import io.dualmesh.app.model.ConnectionState
 import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
 import io.dualmesh.app.model.RadioChannel
-import io.dualmesh.app.model.RadioDevice
 import io.dualmesh.app.model.RadioContact
 import io.dualmesh.app.model.TraceRouteHop
 import io.dualmesh.app.model.TraceRouteResult
@@ -93,8 +92,6 @@ fun DualMeshApp(
     requestPermissions: () -> Unit,
 ) {
     val manager = viewModel.manager
-    val devices by manager.scanner.devices.collectAsStateWithLifecycle()
-    val scanning by manager.scanner.scanning.collectAsStateWithLifecycle()
     val selectedNetwork by manager.selectedNetwork.collectAsStateWithLifecycle()
     val messages by manager.messages.collectAsStateWithLifecycle()
     val nodes by manager.nodes.collectAsStateWithLifecycle()
@@ -112,7 +109,6 @@ fun DualMeshApp(
     val meshtasticContacts by manager.meshtastic.contacts.collectAsStateWithLifecycle()
     val selectedConversationIds by manager.selectedConversationIds.collectAsStateWithLifecycle()
     val packetLoggingNetworks by manager.packetLogger.enabledNetworks.collectAsStateWithLifecycle()
-    val connectionHistory by manager.connectionHistory.collectAsStateWithLifecycle()
     val meshCoreConnections by manager.meshCore.deviceConnections.collectAsStateWithLifecycle()
     val meshtasticConnections by manager.meshtastic.deviceConnections.collectAsStateWithLifecycle()
     val selectedDeviceIds by manager.selectedDeviceIds.collectAsStateWithLifecycle()
@@ -131,9 +127,11 @@ fun DualMeshApp(
     }
     var showViewMenu by remember { mutableStateOf(false) }
     var showPacketLog by rememberSaveable { mutableStateOf(false) }
+    var showRadioManager by rememberSaveable { mutableStateOf(false) }
     var showMap by rememberSaveable { mutableStateOf(false) }
 
     DualMeshTheme {
+        if (showRadioManager) RadioConnectionsDialog(manager, requestScan = requestPermissions, onDismiss = { showRadioManager = false })
         if (showMap) {
             MeshMapDialog(manager = manager, onDismiss = { showMap = false })
         }
@@ -173,6 +171,8 @@ fun DualMeshApp(
                                 expanded = showViewMenu,
                                 onDismissRequest = { showViewMenu = false },
                             ) {
+                                DropdownMenuItem(text = { Text("Packet logs") }, onClick = { showViewMenu = false; showPacketLog = true })
+                                HorizontalDivider()
                                 Text(
                                     "Phone layout",
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -222,7 +222,7 @@ fun DualMeshApp(
                             }
                         }
                         Spacer(Modifier.width(6.dp))
-                        HeaderAction("Packets") { showPacketLog = true }
+                        HeaderAction("Radios") { showRadioManager = true }
                         Spacer(Modifier.width(8.dp))
                     },
                 )
@@ -241,8 +241,6 @@ fun DualMeshApp(
                             network = MeshNetwork.MESHTASTIC,
                             state = meshtasticState,
                             connectedDeviceName = meshtasticName,
-                            devices = devices.filter { it.network == MeshNetwork.MESHTASTIC },
-                            scanning = scanning,
                             channels = meshtasticChannels,
                             selectedChannel = meshtasticSelected,
                             capacity = meshtasticCapacity,
@@ -251,8 +249,7 @@ fun DualMeshApp(
                             nodes = nodes,
                             selectedConversationIds = selectedConversationIds,
                             packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
-                            connectionProfiles =
-                                connectionHistory[MeshNetwork.MESHTASTIC].orEmpty(),
+
                             deviceConnections = meshtasticConnections,
                             selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
                             viewModel = viewModel,
@@ -264,8 +261,6 @@ fun DualMeshApp(
                             network = MeshNetwork.MESHCORE,
                             state = meshCoreState,
                             connectedDeviceName = meshCoreName,
-                            devices = devices.filter { it.network == MeshNetwork.MESHCORE },
-                            scanning = scanning,
                             channels = meshCoreChannels,
                             selectedChannel = meshCoreSelected,
                             capacity = meshCoreCapacity,
@@ -274,8 +269,7 @@ fun DualMeshApp(
                             nodes = nodes,
                             selectedConversationIds = selectedConversationIds,
                             packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
-                            connectionProfiles =
-                                connectionHistory[MeshNetwork.MESHCORE].orEmpty(),
+
                             deviceConnections = meshCoreConnections,
                             selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
                             viewModel = viewModel,
@@ -289,8 +283,6 @@ fun DualMeshApp(
                             network = MeshNetwork.MESHTASTIC,
                             state = meshtasticState,
                             connectedDeviceName = meshtasticName,
-                            devices = devices.filter { it.network == MeshNetwork.MESHTASTIC },
-                            scanning = scanning,
                             channels = meshtasticChannels,
                             selectedChannel = meshtasticSelected,
                             capacity = meshtasticCapacity,
@@ -299,8 +291,7 @@ fun DualMeshApp(
                             nodes = nodes,
                             selectedConversationIds = selectedConversationIds,
                             packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
-                            connectionProfiles =
-                                connectionHistory[MeshNetwork.MESHTASTIC].orEmpty(),
+
                             deviceConnections = meshtasticConnections,
                             selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
                             viewModel = viewModel,
@@ -312,8 +303,6 @@ fun DualMeshApp(
                             network = MeshNetwork.MESHCORE,
                             state = meshCoreState,
                             connectedDeviceName = meshCoreName,
-                            devices = devices.filter { it.network == MeshNetwork.MESHCORE },
-                            scanning = scanning,
                             channels = meshCoreChannels,
                             selectedChannel = meshCoreSelected,
                             capacity = meshCoreCapacity,
@@ -322,8 +311,7 @@ fun DualMeshApp(
                             nodes = nodes,
                             selectedConversationIds = selectedConversationIds,
                             packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
-                            connectionProfiles =
-                                connectionHistory[MeshNetwork.MESHCORE].orEmpty(),
+
                             deviceConnections = meshCoreConnections,
                             selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
                             viewModel = viewModel,
@@ -346,10 +334,6 @@ fun DualMeshApp(
                                 network = MeshNetwork.MESHTASTIC,
                                 state = meshtasticState,
                                 connectedDeviceName = meshtasticName,
-                                devices = devices.filter {
-                                    it.network == MeshNetwork.MESHTASTIC
-                                },
-                                scanning = scanning,
                                 channels = meshtasticChannels,
                                 selectedChannel = meshtasticSelected,
                                 capacity = meshtasticCapacity,
@@ -359,8 +343,7 @@ fun DualMeshApp(
                                 selectedConversationIds = selectedConversationIds,
                                 packetLogging =
                                     MeshNetwork.MESHTASTIC in packetLoggingNetworks,
-                                connectionProfiles =
-                                    connectionHistory[MeshNetwork.MESHTASTIC].orEmpty(),
+
                                 deviceConnections = meshtasticConnections,
                                 selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
                                 viewModel = viewModel,
@@ -372,8 +355,6 @@ fun DualMeshApp(
                                 network = MeshNetwork.MESHCORE,
                                 state = meshCoreState,
                                 connectedDeviceName = meshCoreName,
-                                devices = devices.filter { it.network == MeshNetwork.MESHCORE },
-                                scanning = scanning,
                                 channels = meshCoreChannels,
                                 selectedChannel = meshCoreSelected,
                                 capacity = meshCoreCapacity,
@@ -382,8 +363,7 @@ fun DualMeshApp(
                                 nodes = nodes,
                                 selectedConversationIds = selectedConversationIds,
                                 packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
-                                connectionProfiles =
-                                    connectionHistory[MeshNetwork.MESHCORE].orEmpty(),
+
                                 deviceConnections = meshCoreConnections,
                                 selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
                                 viewModel = viewModel,
@@ -735,8 +715,6 @@ private fun NetworkPane(
     network: MeshNetwork,
     state: ConnectionState,
     connectedDeviceName: String?,
-    devices: List<RadioDevice>,
-    scanning: Boolean,
     channels: List<RadioChannel>,
     selectedChannel: Int,
     capacity: Int,
@@ -745,7 +723,6 @@ private fun NetworkPane(
     nodes: List<MeshNode>,
     selectedConversationIds: Map<MeshNetwork, String>,
     packetLogging: Boolean,
-    connectionProfiles: List<ConnectionProfileStore.Profile>,
     deviceConnections: List<MultiDeviceBackend.DeviceConnection>,
     selectedDeviceId: String?,
     viewModel: MainViewModel,
@@ -808,23 +785,7 @@ private fun NetworkPane(
                 }
             }
         }
-        ConnectionPanel(
-            network = network,
-            state = state,
-            connectedDeviceName = connectedDeviceName,
-            devices = devices,
-            scanning = scanning,
-            connectionProfiles = connectionProfiles,
-            deviceConnections = deviceConnections,
-            selectedDeviceId = selectedDeviceId,
-            onScan = requestPermissions,
-            onConnect = viewModel::connect,
-            onConnectProfile = viewModel::connect,
-            onConnectTcp = viewModel::connectMeshtasticTcp,
-            onDisconnect = { viewModel.disconnect(network) },
-            onDisconnectProfile = viewModel::disconnect,
-            onSelectDevice = viewModel::selectDevice,
-        )
+        ConnectionPanel(network, state, connectedDeviceName, manager, requestPermissions, onDisconnect = { viewModel.disconnect(network) })
         if (deviceConnections.isNotEmpty()) {
             Row(
                 modifier = Modifier
@@ -917,184 +878,23 @@ private fun ConnectionPanel(
     network: MeshNetwork,
     state: ConnectionState,
     connectedDeviceName: String?,
-    devices: List<RadioDevice>,
-    scanning: Boolean,
-    connectionProfiles: List<ConnectionProfileStore.Profile>,
-    deviceConnections: List<MultiDeviceBackend.DeviceConnection>,
-    selectedDeviceId: String?,
-    onScan: () -> Unit,
-    onConnect: (RadioDevice) -> Unit,
-    onConnectProfile: (ConnectionProfileStore.Profile) -> Unit,
-    onConnectTcp: (String) -> Result<Unit>,
+    manager: io.dualmesh.app.DualMeshManager,
+    requestScan: () -> Unit,
     onDisconnect: () -> Unit,
-    onDisconnectProfile: (ConnectionProfileStore.Profile) -> Unit,
-    onSelectDevice: (ConnectionProfileStore.Profile) -> Unit,
 ) {
     var expanded by rememberSaveable(network) { mutableStateOf(false) }
-    LaunchedEffect(state) {
-        if (state == ConnectionState.CONNECTED) expanded = false
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(),
-        colors = CardDefaults.cardColors(
-            containerColor = GlassSurface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-        ),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, GlassOutline),
-    ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusDot(state)
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 10.dp),
-                ) {
-                    Text(
-                        connectedDeviceName ?: "${network.label} connection",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        state.label(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = { expanded = !expanded }) {
-                    Text(if (expanded) "Hide" else "Manage")
-                }
-                if (state == ConnectionState.CONNECTED) {
-                    TextButton(onClick = onDisconnect) {
-                        Text("Disconnect")
-                    }
-                }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = GlassSurface), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, GlassOutline)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            StatusDot(state)
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(connectedDeviceName ?: "${network.label} connection", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(state.label(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            AnimatedVisibility(expanded) {
-                Column {
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    if (connectionProfiles.isNotEmpty()) {
-                        RecentConnections(
-                            profiles = connectionProfiles,
-                            deviceConnections = deviceConnections,
-                            selectedDeviceId = selectedDeviceId,
-                            onConnect = onConnectProfile,
-                            onDisconnect = onDisconnectProfile,
-                            onSelect = onSelectDevice,
-                        )
-                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    }
-                    RadioDiscovery(
-                        devices = devices,
-                        scanning = scanning,
-                        onScan = onScan,
-                        onConnect = onConnect,
-                    )
-                    if (network == MeshNetwork.MESHTASTIC) {
-                        MeshtasticTcpConnect(
-                            connecting = state == ConnectionState.CONNECTING,
-                            onConnect = onConnectTcp,
-                        )
-                    }
-                }
-            }
+            TextButton(onClick = { expanded = true }) { Text("Manage") }
+            if (state == ConnectionState.CONNECTED) TextButton(onClick = onDisconnect) { Text("Disconnect") }
         }
     }
-}
-
-@Composable
-private fun RecentConnections(
-    profiles: List<ConnectionProfileStore.Profile>,
-    deviceConnections: List<MultiDeviceBackend.DeviceConnection>,
-    selectedDeviceId: String?,
-    onConnect: (ConnectionProfileStore.Profile) -> Unit,
-    onDisconnect: (ConnectionProfileStore.Profile) -> Unit,
-    onSelect: (ConnectionProfileStore.Profile) -> Unit,
-) {
-    Text(
-        "Recent connections",
-        style = MaterialTheme.typography.labelLarge,
-    )
-    Text(
-        "Enabled radios receive independently. Select one to view and send on its preset.",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    profiles.take(MAX_VISIBLE_CONNECTION_PROFILES).forEach { profile ->
-        val id = MultiDeviceBackend.targetId(profile)
-        val connection = deviceConnections.firstOrNull {
-            MultiDeviceBackend.targetId(it.profile) == id
-        }
-        val isSelected = id == selectedDeviceId
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    Text(
-                        profile.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    if (isSelected) {
-                        Surface(
-                            color = NeonBlue.copy(alpha = 0.14f),
-                            shape = CircleShape,
-                            border = BorderStroke(1.dp, NeonBlue.copy(alpha = 0.35f)),
-                        ) {
-                            Text(
-                                "SELECTED",
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = NeonBlue,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
-                }
-                Text(
-                    "${profile.transport.name} · ${profile.address}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                connection?.mqttProxyStatus?.let { status ->
-                    Text(
-                        status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (connection == null) {
-                TextButton(onClick = { onConnect(profile) }) {
-                    Text("Connect")
-                }
-            } else {
-                TextButton(
-                    enabled = !isSelected,
-                    onClick = { onSelect(profile) },
-                ) {
-                    Text(if (isSelected) connection.state.label() else "Use")
-                }
-                TextButton(onClick = { onDisconnect(profile) }) {
-                    Text("Stop")
-                }
-            }
-        }
-    }
+    if (expanded) RadioConnectionsDialog(manager, initialNetwork = network, requestScan = requestScan, onDismiss = { expanded = false })
 }
 
 @Composable
@@ -1384,105 +1184,6 @@ internal fun nodeLastSeenLabel(node: MeshNode): String {
         else -> "${ageMillis / 86_400_000}d ago"
     }
     return "Last heard $age"
-}
-
-@Composable
-private fun RadioDiscovery(
-    devices: List<RadioDevice>,
-    scanning: Boolean,
-    onScan: () -> Unit,
-    onConnect: (RadioDevice) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("Bluetooth radios", style = MaterialTheme.typography.labelLarge)
-            Text(
-                if (devices.isEmpty()) {
-                    "Scan for a nearby companion"
-                } else {
-                    "${devices.size} nearby"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        OutlinedButton(onClick = onScan, contentPadding = PaddingValues(horizontal = 14.dp)) {
-            Text(if (scanning) "Scanning…" else "Scan")
-        }
-    }
-    devices.take(4).forEach { device ->
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(device.name, style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "${device.rssi} dBm",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = { onConnect(device) }) {
-                Text("Connect")
-            }
-        }
-    }
-}
-
-@Composable
-private fun MeshtasticTcpConnect(
-    connecting: Boolean,
-    onConnect: (String) -> Result<Unit>,
-) {
-    var endpoint by rememberSaveable { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-    Text("Wi-Fi / Ethernet", style = MaterialTheme.typography.labelLarge)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        OutlinedTextField(
-            value = endpoint,
-            onValueChange = {
-                endpoint = it
-                error = null
-            },
-            modifier = Modifier.weight(1f),
-            singleLine = true,
-            label = { Text("Host or IP") },
-            placeholder = { Text("mesh-radio.local") },
-            isError = error != null,
-        )
-        Button(
-            enabled = endpoint.isNotBlank() && !connecting,
-            contentPadding = PaddingValues(horizontal = 14.dp),
-            onClick = {
-                val result = onConnect(endpoint)
-                error = result.exceptionOrNull()?.message
-            },
-        ) {
-            Text(if (connecting) "Wait…" else "TCP")
-        }
-    }
-    error?.let {
-        Text(
-            it,
-            modifier = Modifier.padding(top = 4.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
 }
 
 @Composable
@@ -1919,7 +1620,6 @@ private fun networkAccent(network: MeshNetwork): Color = when (network) {
 }
 
 private const val MAX_VISIBLE_CONTACT_RESULTS = 30
-private const val MAX_VISIBLE_CONNECTION_PROFILES = 6
 private const val MAX_VISIBLE_REACTIONS = 5
 private const val MAX_VISIBLE_TRACE_HISTORY = 25
 private val TABLET_TWO_PANE_WIDTH = 720.dp

@@ -42,14 +42,17 @@ class MultiDeviceBackend(
         val contacts: List<RadioContact>,
         val nodes: List<MeshNode>,
         val mqttProxyStatus: String? = null,
+        val error: String? = null,
+        val retryAtMillis: Long? = null,
     )
 
     private data class Slot(
         var profile: ConnectionProfileStore.Profile,
         val backend: MessagingBackend,
         val observers: MutableList<Job> = mutableListOf(),
-        var reconnectJob: Job? = null,
-        var reconnectAttempt: Int = 0,
+        var retrier: io.dualmesh.app.connection.ConnectionRetrier? = null,
+        var retryAtMillis: Long? = null,
+        var startError: String? = null,
     )
 
     override val maxMessageBytes: Int =
@@ -100,9 +103,9 @@ class MultiDeviceBackend(
         if (existing != null) {
             existing.profile = profile.copy(enabled = true)
             if (makeOutbound || outboundId == null) outboundId = id
-            connectSlot(id, existing)
+            val result = connectSlot(id, existing)
             refreshAggregate()
-            return Result.success(Unit)
+            return result
         }
         if (slots.size >= MAX_ACTIVE_DEVICES) {
             return Result.failure(
@@ -129,7 +132,7 @@ class MultiDeviceBackend(
     fun remove(profile: ConnectionProfileStore.Profile) {
         val id = targetId(profile)
         val slot = slots.remove(id) ?: return
-        slot.reconnectJob?.cancel()
+        slot.retrier?.cancel()
         slot.observers.forEach(Job::cancel)
         slot.backend.disconnect()
         if (outboundId == id) outboundId = slots.keys.firstOrNull()
@@ -171,7 +174,7 @@ class MultiDeviceBackend(
 
     override fun disconnect() {
         slots.values.forEach { slot ->
-            slot.reconnectJob?.cancel()
+            slot.retrier?.cancel()
             slot.observers.forEach(Job::cancel)
             slot.backend.disconnect()
         }
@@ -220,6 +223,12 @@ class MultiDeviceBackend(
     }
 
     private fun observe(id: String, slot: Slot) {
+        slot.retrier = io.dualmesh.app.connection.ConnectionRetrier(scope,
+            shouldRetry = { slots[id] === slot && (slot.startError != null || slot.backend.connectionState.value in setOf(ConnectionState.DISCONNECTED, ConnectionState.ERROR)) },
+            connect = { connectSlot(id, slot, cancelRetry = false) },
+            changed = { _, next -> slot.retryAtMillis = next; refreshAggregate() },
+        )
+
         (slot.backend as? MeshtasticBackend)?.let { backend ->
             slot.observers += backend.mqttProxyStatus
                 .onEach { refreshAggregate() }
@@ -250,9 +259,8 @@ class MultiDeviceBackend(
                 if (slots[id] !== slot) return@onEach
                 when (state) {
                     ConnectionState.CONNECTED -> {
-                        slot.reconnectAttempt = 0
-                        slot.reconnectJob?.cancel()
-                        slot.reconnectJob = null
+                        slot.startError = null
+                        slot.retrier?.cancel(reset = true)
                     }
                     ConnectionState.DISCONNECTED,
                     ConnectionState.ERROR,
@@ -263,6 +271,7 @@ class MultiDeviceBackend(
             }
             .launchIn(scope)
         listOf(
+            slot.backend.connectionError,
             slot.backend.connectedDeviceName,
             slot.backend.channels,
             slot.backend.contacts,
@@ -276,43 +285,37 @@ class MultiDeviceBackend(
         }
     }
 
-    private fun connectSlot(id: String, slot: Slot): Result<Unit> {
-        slot.reconnectJob?.cancel()
-        slot.reconnectJob = null
-        return when (slot.profile.transport) {
-            ConnectionProfileStore.Transport.BLE -> {
-                slot.backend.connect(slot.profile.address, slot.profile.name)
-                Result.success(Unit)
+    private fun connectSlot(id: String, slot: Slot, cancelRetry: Boolean = true): Result<Unit> {
+        if (cancelRetry) slot.retrier?.cancel()
+        slot.startError = null
+        val result = runCatching {
+            when (slot.profile.transport) {
+                ConnectionProfileStore.Transport.BLE -> { slot.backend.connect(slot.profile.address, slot.profile.name); Result.success(Unit) }
+                ConnectionProfileStore.Transport.TCP -> when (val backend = slot.backend) {
+                    is MeshtasticBackend -> backend.connectTcp(slot.profile.address)
+                    is MeshCoreBackend -> backend.connectTcp(slot.profile.address)
+                    else -> Result.failure(IllegalArgumentException("TCP is unavailable"))
+                }
+                ConnectionProfileStore.Transport.USB -> when (val backend = slot.backend) {
+                    is MeshtasticBackend -> backend.connectUsb(slot.profile.address, slot.profile.name)
+                    is MeshCoreBackend -> backend.connectUsb(slot.profile.address, slot.profile.name)
+                    else -> Result.failure(IllegalArgumentException("USB is unavailable"))
+                }
             }
-            ConnectionProfileStore.Transport.TCP -> {
-                val backend = slot.backend as? MeshtasticBackend
-                    ?: return Result.failure(
-                        IllegalArgumentException("TCP is only supported by Meshtastic"),
-                    )
-                backend.connectTcp(slot.profile.address)
-            }
-        }.also {
-            if (it.isFailure && slots[id] === slot) refreshAggregate()
+        }.getOrElse { Result.failure(it) }
+        if (result.isFailure && slots[id] === slot) {
+            slot.startError = result.exceptionOrNull()?.message ?: "Could not start connection"
+            scheduleReconnect(id, slot)
         }
+        refreshAggregate()
+        return result
     }
 
-    private fun scheduleReconnect(id: String, slot: Slot) {
-        if (slot.reconnectJob?.isActive == true || slots[id] !== slot) return
-        val delayMillis = RETRY_DELAYS_MS[
-            slot.reconnectAttempt.coerceAtMost(RETRY_DELAYS_MS.lastIndex)
-        ]
-        slot.reconnectJob = scope.launch {
-            delay(delayMillis)
-            if (slots[id] !== slot) return@launch
-            slot.reconnectJob = null
-            if (slot.backend.connectionState.value == ConnectionState.DISCONNECTED ||
-                slot.backend.connectionState.value == ConnectionState.ERROR
-            ) {
-                slot.reconnectAttempt++
-                connectSlot(id, slot)
-            }
-        }
-    }
+    fun retryFailed() { slots.toMap().forEach { (id, slot) ->
+        if (slot.backend.connectionState.value in setOf(ConnectionState.ERROR, ConnectionState.DISCONNECTED)) connectSlot(id, slot)
+    } }
+
+    private fun scheduleReconnect(id: String, slot: Slot) { if (slots[id] === slot) slot.retrier?.schedule() }
 
     private fun refreshAggregate() {
         val states = slots.values.map { it.backend.connectionState.value }
@@ -333,8 +336,10 @@ class MultiDeviceBackend(
         _deviceConnections.value = slots.map { (id, slot) ->
             DeviceConnection(
                 profile = slot.profile,
-                state = slot.backend.connectionState.value,
+                state = if (slot.startError != null) ConnectionState.ERROR else slot.backend.connectionState.value,
                 mqttProxyStatus = (slot.backend as? MeshtasticBackend)?.mqttProxyStatus?.value,
+                error = slot.startError ?: slot.backend.connectionError.value,
+                retryAtMillis = slot.retryAtMillis,
                 isOutbound = id == outboundId,
                 channels = slot.backend.channels.value,
                 contacts = slot.backend.contacts.value,
@@ -375,7 +380,6 @@ class MultiDeviceBackend(
 
     companion object {
         const val MAX_ACTIVE_DEVICES = 4
-        private val RETRY_DELAYS_MS = longArrayOf(2_000, 5_000, 10_000, 30_000, 60_000)
 
         fun targetId(profile: ConnectionProfileStore.Profile): String =
             "${profile.network.name}:${profile.transport.name}:${profile.address}"

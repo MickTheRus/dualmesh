@@ -10,7 +10,10 @@ import io.dualmesh.app.model.UnifiedMessage
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
+private val noConnectionError = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
 interface MessagingBackend {
+    val connectionError: StateFlow<String?> get() = noConnectionError
     val contactRoutes: io.dualmesh.app.nodes.ContactRoutes? get() = null
     val nodeActions: io.dualmesh.app.nodes.NodeActions? get() = null
     val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess? get() = null

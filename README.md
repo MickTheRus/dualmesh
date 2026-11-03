@@ -32,9 +32,9 @@ The screenshots contain test data. They do not contain data from a real deployme
 1. Install the debug APK.
 2. Give the app access to Nearby devices and notifications.
 3. Select **Manage** in the applicable network pane.
-4. Add a BLE radio.
-5. For Meshtastic TCP, enter a host name or `host:port`.
-6. If you do not enter a port, the app uses port `4403`.
+4. Filter by Bluetooth, Wi-Fi/TCP, or USB/serial and enable the radio or radios you want.
+5. For Wi-Fi/TCP, add a host name or `host:port` with the matching mesh protocol.
+6. Default ports are `5000` for MeshCore and `4403` for Meshtastic.
 7. Select a radio.
 8. Select one of its channels or direct-message conversations.
 9. Select **Nodes** or **Nodes / Map** to open the compact node list, then **Map** for positions.
@@ -45,14 +45,14 @@ The screenshots contain test data. They do not contain data from a real deployme
 12. For MeshCore contacts, use **Route > Set route** to edit direct, flood, or manual paths and
     discover a route to review before saving.
 
-Enable **Packets** only when you must record protocol traffic.
+Enable packet recording under **View > Packet logs** only when you must record protocol traffic.
 
 WARNING: A packet log can contain keys, messages, node IDs, and locations.
 
 ### Meshtastic MQTT client proxy
 
 DualMesh can use the phone's Internet connection as the MQTT gateway for each connected
-Meshtastic radio, over BLE or TCP. Open that radio's **Settings > Module · MQTT** (or use the
+Meshtastic radio, over Bluetooth, Wi-Fi/TCP, or USB serial. Open that radio's **Settings > Module · MQTT** (or use the
 Meshtastic app or CLI): enable **MQTT** and **Proxy to client enabled**, then set the broker, credentials,
 TLS, and root topic. Enable channel **Uplink** and/or **Downlink** as needed.
 
@@ -67,6 +67,15 @@ Broker credentials stay in memory for the connection. The radio controls encrypt
 downlink, and map reporting; these can be edited under the radio's **Settings**.
 The proxy does not queue traffic while the broker is offline, and it drops oversized packets
 or excess downlink traffic when the radio transport is busy.
+
+### Radio management
+
+Open **Radios** (or **Manage** in either mesh pane). Filter by Bluetooth, Wi-Fi/TCP, USB/serial,
+and mesh protocol. Enable multiple radios to receive independently; choose **Use for messages**
+for the outbound radio on each mesh. Each row shows connection errors and automatic-retry status.
+Add Wi-Fi endpoints manually or select an attached USB serial device and approve access.
+See [radio connections](docs/RADIO_CONNECTIONS.md) for compatibility and permissions.
+Packet logs are available under **View > Packet logs**.
 
 ### Node statistics and announcements
 
@@ -106,8 +115,9 @@ Refresh reads configuration without changing it.
 
 - Connect a maximum of four radios for each mesh technology.
 - Keep each radio, channel, contact, message, and map in its own data scope.
-- Connect to MeshCore with BLE.
-- Connect to Meshtastic with BLE or TCP.
+- Connect to MeshCore with Bluetooth, Wi-Fi/TCP, or USB serial.
+- Connect to Meshtastic with Bluetooth, Wi-Fi/TCP, or USB serial.
+- Manage multiple radios with transport/network filters, per-radio retry status and outbound selection.
 - Read and edit settings on either connected radio, with acknowledged writes and readback.
 - Proxy Meshtastic MQTT through the phone using each radio's MQTT configuration.
 - Find the channels that each radio supplies.
@@ -204,6 +214,7 @@ debug signing. It is not a production release.
 - [Visual design](docs/DESIGN.md)
 - [Protocol design](docs/PROTOCOLS.md)
 - [Nodes, contacts, and maps](docs/NODES_AND_MAPS.md)
+- [Radio connections](docs/RADIO_CONNECTIONS.md)
 - [Radio settings](docs/RADIO_SETTINGS.md)
 - [Packet logs](docs/PACKET_LOGGING.md)
 - [Privacy and security](docs/PRIVACY_AND_SECURITY.md)

@@ -381,6 +381,7 @@ class GattSession(
             null
         }
         if (gatt != null) scheduleConnectionTimeout()
+        else listener.onError("Bluetooth could not connect. Check that Bluetooth and the radio are on.")
     }
 
     @SuppressLint("MissingPermission")

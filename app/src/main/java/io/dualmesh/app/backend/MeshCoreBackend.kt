@@ -33,9 +33,14 @@ class MeshCoreBackend(
     context: Context,
     private val packetLogger: PacketLogger,
     private val captureSource: String = "",
-) : MessagingBackend, GattSession.Listener {
+) : MessagingBackend, GattSession.Listener, io.dualmesh.app.transport.MeshtasticTcpSession.Listener, io.dualmesh.app.transport.UsbRadioSession.Listener {
     override val network = MeshNetwork.MESHCORE
     override val maxMessageBytes = 127
+    private val _connectionError = MutableStateFlow<String?>(null)
+    override val connectionError = _connectionError.asStateFlow()
+    private enum class Transport { NONE, BLE, TCP, USB }
+    private var activeTransport = Transport.NONE
+    private var connectionEpoch = 0
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -67,12 +72,13 @@ class MeshCoreBackend(
     override val selectedChannel: StateFlow<Int> = _selectedChannel.asStateFlow()
 
     private val session = GattSession(context, BleRadioScanner.MESHCORE_SERVICE, this)
+    private val tcpSession = io.dualmesh.app.transport.MeshtasticTcpSession(this, MeshNetwork.MESHCORE)
+    private val usbSession = io.dualmesh.app.transport.UsbRadioSession(context, network, this)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val settingsController: MeshCoreSettingsController = MeshCoreSettingsController(
         send = { frame ->
             if (_connectionState.value != ConnectionState.CONNECTED) false else {
                 writeFrame(frame, "Radio settings command ${frame[0].toInt() and 255}")
-                true
             }
         },
         ready = {
@@ -98,7 +104,6 @@ class MeshCoreBackend(
         send = { frame ->
             if (_connectionState.value != ConnectionState.CONNECTED) false else {
                 writeFrame(frame, "Node action command ${frame[0].toInt() and 255}")
-                true
             }
         },
         ready = {
@@ -124,7 +129,8 @@ class MeshCoreBackend(
     override val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess get() = settingsController
     private val handshakeTimeout = Runnable {
         if (_connectionState.value == ConnectionState.CONNECTING) {
-            session.disconnect()
+            disconnectTransport()
+            _connectionError.value = "The radio did not complete its connection handshake"
             _connectionState.value = ConnectionState.ERROR
         }
     }
@@ -156,6 +162,30 @@ class MeshCoreBackend(
     )
 
     override fun connect(address: String, name: String) {
+        prepareConnection(name)
+        activeTransport = Transport.BLE
+        session.connect(address)
+    }
+
+    fun connectTcp(address: String): Result<Unit> = io.dualmesh.app.transport.MeshtasticTcpSession.Endpoint.parse(address, 5000).map { endpoint ->
+        prepareConnection("Wi-Fi $address")
+        activeTransport = Transport.TCP
+        _connectionState.value = ConnectionState.CONNECTING
+        tcpSession.connect(endpoint)
+    }
+
+    fun connectUsb(address: String, name: String): Result<Unit> {
+        prepareConnection(name)
+        activeTransport = Transport.USB
+        _connectionState.value = ConnectionState.CONNECTING
+        return usbSession.connect(address)
+    }
+
+    private fun prepareConnection(name: String) {
+        disconnectTransport()
+        connectionEpoch++
+        _connectionError.value = null
+        clearHandshakeTimeout()
         pendingContactSync = false
         nodeActionsController.reset()
         settingsController.reset()
@@ -173,7 +203,6 @@ class MeshCoreBackend(
         contactDetails.clear()
         _selectedChannel.value = 0
         _connectedDeviceName.value = name
-        session.connect(address)
     }
 
     override fun disconnect() {
@@ -183,7 +212,7 @@ class MeshCoreBackend(
         clearHandshakeTimeout()
         clearStartupCallbacks()
         failPendingTraces("The MeshCore radio disconnected.")
-        session.disconnect()
+        disconnectTransport()
         _connectedDeviceName.value = null
         _connectionState.value = ConnectionState.DISCONNECTED
     }
@@ -205,10 +234,10 @@ class MeshCoreBackend(
             )
         }
         val nowSeconds = (System.currentTimeMillis() / 1000).toInt()
-        writeFrame(
+        if (!writeFrame(
             MeshCoreProtocol.channelMessage(channel, text, nowSeconds),
             "CMD_SEND_CHANNEL_TXT_MSG channel=$channel",
-        )
+        )) return Result.failure(IllegalStateException("Radio transport is unavailable or busy"))
         val sender = selfName ?: "You"
         _incomingMessages.tryEmit(
             UnifiedMessage(
@@ -245,7 +274,7 @@ class MeshCoreBackend(
         val frame = runCatching {
             MeshCoreProtocol.directMessage(normalizedId, text, nowSeconds)
         }.getOrElse { return Result.failure(it) }
-        writeFrame(frame, "CMD_SEND_TXT_MSG contact=${normalizedId.take(12)}")
+        if (!writeFrame(frame, "CMD_SEND_TXT_MSG contact=${normalizedId.take(12)}")) return Result.failure(IllegalStateException("Radio transport is unavailable or busy"))
         val conversationId = "contact:$normalizedId"
         _incomingMessages.tryEmit(
             UnifiedMessage(
@@ -298,12 +327,13 @@ class MeshCoreBackend(
                 "Tracing the stored path to this MeshCore contact and back."
             },
         )
+        if (!writeFrame(frame, "CMD_SEND_TRACE_PATH target=${normalizedId.take(12)} tag=$tag")) return Result.failure(IllegalStateException("Radio transport is unavailable or busy"))
         pendingTraces[tag] = PendingTrace(
             result = result,
             forwardCount = tracePath.forwardCount,
         )
         _traceRouteResults.tryEmit(result)
-        writeFrame(frame, "CMD_SEND_TRACE_PATH target=${normalizedId.take(12)} tag=$tag")
+
         mainHandler.postDelayed(
             {
                 pendingTraces.remove(tag)?.let { pending ->
@@ -321,17 +351,41 @@ class MeshCoreBackend(
         return Result.success(Unit)
     }
 
-    override fun onConnecting() {
-        _connectionState.value = ConnectionState.CONNECTING
-    }
+    override fun onConnecting() { if (activeTransport == Transport.BLE) _connectionState.value = ConnectionState.CONNECTING }
 
-    override fun onReady() {
+    private fun onMain(action: () -> Unit) {
+        val epoch = connectionEpoch
+        if (Looper.myLooper() == Looper.getMainLooper()) action()
+        else mainHandler.post { if (epoch == connectionEpoch) action() }
+    }
+    override fun onReady() = onMain {
+        if (activeTransport == Transport.BLE) { session.enableNotifications(TX_CHARACTERISTIC); beginHandshake() }
+    }
+    private fun beginHandshake() {
         mainHandler.postDelayed(handshakeTimeout, HANDSHAKE_TIMEOUT_MS)
-        session.enableNotifications(TX_CHARACTERISTIC)
         writeFrame(MeshCoreProtocol.appStart(), "CMD_APP_START")
+    }
+    override fun onTcpConnected() = onMain { if (activeTransport == Transport.TCP) beginHandshake() }
+    override fun onUsbReady() = onMain { if (activeTransport == Transport.USB) beginHandshake() }
+    override fun onTcpPacket(value: ByteArray) = onMain { if (activeTransport == Transport.TCP) handleFrame(value) }
+    override fun onUsbPacket(packet: ByteArray) = onMain { if (activeTransport == Transport.USB) handleFrame(packet) }
+    override fun onTcpDisconnected() = onTcpError("Wi-Fi/TCP connection closed")
+    override fun onTcpError(message: String) = onMain { if (activeTransport == Transport.TCP) streamError(message) }
+    override fun onUsbError(message: String) = onMain { if (activeTransport == Transport.USB) streamError(message) }
+    private fun streamError(message: String) {
+        _connectionError.value = message
+        nodeActionsController.reset(); settingsController.reset()
+        clearHandshakeTimeout(); clearStartupCallbacks(); failPendingTraces(message)
+        _connectionState.value = ConnectionState.ERROR
+    }
+    private fun disconnectTransport() {
+        activeTransport = Transport.NONE
+        connectionEpoch++
+        session.disconnect(); tcpSession.disconnect(); usbSession.disconnect()
     }
 
     override fun onDisconnected() {
+        if (activeTransport != Transport.BLE) return
         if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onDisconnected() }; return }
         pendingContactSync = false
         nodeActionsController.reset()
@@ -343,7 +397,9 @@ class MeshCoreBackend(
     }
 
     override fun onError(message: String) {
+        if (activeTransport != Transport.BLE) return
         if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onError(message) }; return }
+        _connectionError.value = message
         pendingContactSync = false
         nodeActionsController.reset()
         settingsController.reset()
@@ -354,12 +410,16 @@ class MeshCoreBackend(
     }
 
     override fun onNotification(characteristic: UUID, value: ByteArray) {
-        if (characteristic != TX_CHARACTERISTIC || value.isEmpty()) return
-        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onNotification(characteristic, value) }; return }
+        if (activeTransport != Transport.BLE || characteristic != TX_CHARACTERISTIC) return
+        onMain { if (activeTransport == Transport.BLE) handleFrame(value) }
+    }
+
+    private fun handleFrame(value: ByteArray) {
+        if (value.isEmpty()) return
         packetLogger.log(
             network = network,
             direction = PacketDirection.RX,
-            transport = captureTransport("BLE"),
+            transport = captureTransport(activeTransport.name),
             payload = value,
             summary = describeIncomingFrame(value),
         )
@@ -537,15 +597,22 @@ class MeshCoreBackend(
         )
     }
 
-    private fun writeFrame(frame: ByteArray, summary: String) {
+    private fun writeFrame(frame: ByteArray, summary: String): Boolean {
+        val sent = when (activeTransport) {
+            Transport.BLE -> { session.write(RX_CHARACTERISTIC, frame); true }
+            Transport.TCP -> tcpSession.send(frame)
+            Transport.USB -> usbSession.send(frame)
+            Transport.NONE -> false
+        }
+        if (!sent) return false
         packetLogger.log(
             network = network,
             direction = PacketDirection.TX,
-            transport = captureTransport("BLE"),
+            transport = captureTransport(activeTransport.name),
             payload = frame,
             summary = summary,
         )
-        session.write(RX_CHARACTERISTIC, frame)
+        return true
     }
 
     private fun describeIncomingFrame(frame: ByteArray): String {

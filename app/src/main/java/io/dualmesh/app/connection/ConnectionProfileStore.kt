@@ -10,6 +10,7 @@ class ConnectionProfileStore(context: Context) {
     enum class Transport {
         BLE,
         TCP,
+        USB,
     }
 
     data class Profile(
@@ -134,6 +135,20 @@ class ConnectionProfileStore(context: Context) {
         }
     }
 
+    fun remember(profile: Profile) {
+        if (loadAll(profile.network).none { it.sameTarget(profile) }) updateHistory(profile.copy(enabled = false))
+    }
+
+    fun forget(profile: Profile) {
+        disable(profile)
+        val remaining = loadAll(profile.network).filterNot { it.sameTarget(profile) }.mapTo(mutableSetOf(), ::encodeHistoryEntry)
+        val legacyMatches = loadLegacy(profile.network, requireEnabled = false)?.sameTarget(profile) == true
+        preferences.edit {
+            putStringSet(historyKey(profile.network), remaining)
+            if (legacyMatches) listOf("enabled", "transport", "address", "name").forEach { remove(key(profile.network, it)) }
+        }
+    }
+
     fun loadConversation(network: MeshNetwork, deviceId: String? = null): String =
         preferences.getString(conversationKey(network, deviceId), null)
             ?.takeIf {
@@ -160,13 +175,13 @@ class ConnectionProfileStore(context: Context) {
         preferences.edit { putString(KEY_SELECTED_NETWORK, network.name) }
     }
 
-    fun hasEnabledProfiles(): Boolean = MeshNetwork.entries.any { load(it) != null }
+    fun hasEnabledProfiles(): Boolean = MeshNetwork.entries.any { loadEnabled(it).isNotEmpty() }
 
     private fun updateHistory(profile: Profile) {
         val history = loadAll(profile.network)
             .filterNot { it.sameTarget(profile) }
             .plus(profile)
-            .sortedByDescending(Profile::lastUsedMillis)
+            .sortedWith(compareByDescending<Profile> { it.enabled }.thenByDescending { it.lastUsedMillis })
             .take(HISTORY_LIMIT)
             .mapTo(mutableSetOf(), ::encodeHistoryEntry)
         preferences.edit {

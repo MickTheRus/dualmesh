@@ -52,9 +52,11 @@ class MeshtasticBackend(
 ) :
     MessagingBackend,
     GattSession.Listener,
-    MeshtasticTcpSession.Listener {
+    MeshtasticTcpSession.Listener, io.dualmesh.app.transport.UsbRadioSession.Listener {
     override val network = MeshNetwork.MESHTASTIC
     override val maxMessageBytes = 220
+    private val _connectionError = MutableStateFlow<String?>(null)
+    override val connectionError = _connectionError.asStateFlow()
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -87,6 +89,7 @@ class MeshtasticBackend(
 
     private val session = GattSession(context, BleRadioScanner.MESHTASTIC_SERVICE, this)
     private val tcpSession = MeshtasticTcpSession(this)
+    private val usbSession = io.dualmesh.app.transport.UsbRadioSession(context, network, this)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val settingsController: MeshtasticSettingsController = MeshtasticSettingsController(
         send = { sendTransport(it) },
@@ -129,6 +132,7 @@ class MeshtasticBackend(
             _connectionState.value = ConnectionState.ERROR
         }
     }
+    private var connectionEpoch = 0
     private var activeTransport = Transport.NONE
     private var myNodeNum = 0
     private var reading = false
@@ -150,7 +154,15 @@ class MeshtasticBackend(
             tcpSession.connect(endpoint)
         }
 
+    fun connectUsb(address: String, name: String): Result<Unit> {
+        prepareConnection(Transport.USB, name)
+        _connectionState.value = ConnectionState.CONNECTING
+        return usbSession.connect(address)
+    }
+
     private fun prepareConnection(transport: Transport, name: String) {
+        disconnectActiveTransport()
+        _connectionError.value = null
         nodeActionsController.reset()
         ownUsers.clear()
         settingsController.reset()
@@ -182,8 +194,10 @@ class MeshtasticBackend(
         clearHandshakeTimeout()
         failPendingTraces("The Meshtastic radio disconnected.")
         activeTransport = Transport.NONE
+        connectionEpoch++
         session.disconnect()
         tcpSession.disconnect()
+        usbSession.disconnect()
         _connectedDeviceName.value = null
         _connectionState.value = ConnectionState.DISCONNECTED
     }
@@ -367,7 +381,7 @@ class MeshtasticBackend(
 
     override fun onDisconnected() {
         if (activeTransport != Transport.BLE) return
-        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onDisconnected() }; return }
+        if (Looper.myLooper() != Looper.getMainLooper()) { onMain { onDisconnected() }; return }
         nodeActionsController.reset()
         ownUsers.clear()
         settingsController.reset()
@@ -381,7 +395,8 @@ class MeshtasticBackend(
 
     override fun onError(message: String) {
         if (activeTransport != Transport.BLE) return
-        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onError(message) }; return }
+        if (Looper.myLooper() != Looper.getMainLooper()) { onMain { onError(message) }; return }
+        _connectionError.value = message
         nodeActionsController.reset()
         ownUsers.clear()
         settingsController.reset()
@@ -420,7 +435,7 @@ class MeshtasticBackend(
     }
 
     private fun handleFromRadio(fromRadio: FromRadio) {
-        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { handleFromRadio(fromRadio) }; return }
+        if (Looper.myLooper() != Looper.getMainLooper()) { onMain { handleFromRadio(fromRadio) }; return }
         settingsController.observe(fromRadio)
         fromRadio.moduleConfig?.mqtt?.let {
             mqttConfig = it
@@ -766,19 +781,40 @@ class MeshtasticBackend(
         mainHandler.removeCallbacks(handshakeTimeout)
     }
 
-    override fun onTcpConnected() {
-        if (activeTransport != Transport.TCP) return
-        mainHandler.postDelayed(handshakeTimeout, HANDSHAKE_TIMEOUT_MS)
-        sendTransport(ToRadio(want_config_id = configNonce).encode())
+    private fun onMain(action: () -> Unit) {
+        val epoch = connectionEpoch
+        if (Looper.myLooper() == Looper.getMainLooper()) action()
+        else mainHandler.post { if (epoch == connectionEpoch) action() }
+    }
+    override fun onTcpConnected() = onMain {
+        if (activeTransport == Transport.TCP) {
+            mainHandler.postDelayed(handshakeTimeout, HANDSHAKE_TIMEOUT_MS)
+            sendTransport(ToRadio(want_config_id = configNonce).encode())
+        }
     }
 
-    override fun onTcpPacket(value: ByteArray) {
-        if (activeTransport != Transport.TCP) return
+    override fun onUsbReady() = onMain {
+        if (activeTransport == Transport.USB) {
+            mainHandler.postDelayed(handshakeTimeout, HANDSHAKE_TIMEOUT_MS)
+            sendTransport(ToRadio(want_config_id = configNonce).encode())
+        }
+    }
+    override fun onUsbPacket(packet: ByteArray) = onMain { if (activeTransport == Transport.USB) handleStreamPacket(packet) }
+    override fun onUsbError(message: String) {
+        if (activeTransport != Transport.USB) return
+        if (Looper.myLooper() != Looper.getMainLooper()) { onMain { onUsbError(message) }; return }
+        _connectionError.value = message
+        nodeActionsController.reset(); ownUsers.clear(); settingsController.reset(); mqttProxy.stop()
+        clearHandshakeTimeout(); failPendingTraces(message); configReady = false
+        _connectionState.value = ConnectionState.ERROR
+    }
+    override fun onTcpPacket(value: ByteArray) = onMain { if (activeTransport == Transport.TCP) handleStreamPacket(value) }
+    private fun handleStreamPacket(value: ByteArray) {
         val decoded = runCatching { FromRadio.ADAPTER.decode(value) }
         packetLogger.log(
             network = network,
             direction = PacketDirection.RX,
-            transport = captureTransport("TCP"),
+            transport = captureTransport(activeTransport.name),
             payload = value,
             summary = decoded.getOrNull()?.let(::describeFromRadio) ?: "Invalid FromRadio",
         )
@@ -787,7 +823,7 @@ class MeshtasticBackend(
 
     override fun onTcpDisconnected() {
         if (activeTransport != Transport.TCP) return
-        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onTcpDisconnected() }; return }
+        if (Looper.myLooper() != Looper.getMainLooper()) { onMain { onTcpDisconnected() }; return }
         nodeActionsController.reset()
         ownUsers.clear()
         settingsController.reset()
@@ -800,12 +836,13 @@ class MeshtasticBackend(
 
     override fun onTcpError(message: String) {
         if (activeTransport != Transport.TCP) return
-        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onTcpError(message) }; return }
+        if (Looper.myLooper() != Looper.getMainLooper()) { onMain { onTcpError(message) }; return }
         nodeActionsController.reset()
         ownUsers.clear()
         settingsController.reset()
         mqttProxy.stop()
         clearHandshakeTimeout()
+        _connectionError.value = message
         failPendingTraces(message)
         configReady = false
         _connectionState.value = ConnectionState.ERROR
@@ -821,6 +858,7 @@ class MeshtasticBackend(
                 }
             }
             Transport.TCP -> tcpSession.send(payload, bounded = mqttDownlink)
+            Transport.USB -> usbSession.send(payload)
             Transport.NONE -> false
         }
         if (sent) {
@@ -890,9 +928,13 @@ class MeshtasticBackend(
     }
 
     private fun disconnectActiveTransport() {
-        when (activeTransport) {
+        val transport = activeTransport
+        activeTransport = Transport.NONE
+        connectionEpoch++
+        when (transport) {
             Transport.BLE -> session.disconnect()
             Transport.TCP -> tcpSession.disconnect()
+            Transport.USB -> usbSession.disconnect()
             Transport.NONE -> Unit
         }
     }
@@ -932,5 +974,6 @@ class MeshtasticBackend(
         NONE,
         BLE,
         TCP,
+        USB,
     }
 }

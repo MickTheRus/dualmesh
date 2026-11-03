@@ -52,7 +52,7 @@ The key keeps equal channel numbers on different radios separate.
 | MeshCore protocol | `protocol/MeshCoreProtocol.kt` |
 | Meshtastic connection | `backend/MeshtasticBackend.kt` |
 | Meshtastic TCP frames | `protocol/MeshtasticStreamCodec.kt` |
-| Meshtastic TCP socket | `transport/MeshtasticTcpSession.kt` |
+| Shared companion TCP socket | `transport/MeshtasticTcpSession.kt` |
 | Meshtastic text metadata | `protocol/MeshtasticTextMetadata.kt` |
 | Message database | `history/MessageHistoryStore.kt` |
 | Node database | `history/NodeHistoryStore.kt` |
@@ -117,7 +117,7 @@ stops an unsupported request.
 
 ### Transports
 
-Meshtastic can use BLE or the TCP Stream API.
+Meshtastic can use BLE, USB serial, or the TCP Stream API. USB and TCP share the Meshtastic stream framing.
 
 TCP input has one of these forms:
 
@@ -135,7 +135,7 @@ The decoder accepts split input and wake bytes. It finds the next header after i
 
 ### Connection sequence
 
-1. Connect to BLE or TCP.
+1. Connect to BLE, USB serial, or TCP.
 2. Create a nonzero random configuration ID.
 3. Send the ID in `ToRadio.want_config_id`.
 4. Read `FromRadio` configuration records.
@@ -214,16 +214,16 @@ the sender and reaction.
 
 ## Connection restore
 
-The app saves BLE addresses and Meshtastic TCP endpoints. It saves a maximum of 12 known targets
+The app saves BLE addresses, TCP endpoints, and USB identities for both protocols. It saves a maximum of 12 known targets
 for each technology. It connects a maximum of four targets for each technology.
 
 An unexpected disconnect uses these retry delays:
 
 ```text
-2, 5, 10, 30, 60 seconds
+1, 2, 5, 10, 30 seconds
 ```
 
-A successful connection resets the delay. **Stop** disables one target. **Disconnect** disables
+A successful connection resets the delay. The connection-manager checkbox disables one target. **Disconnect** disables
 all targets for that technology.
 
 `BootReceiver` restores enabled profiles after device start or app replacement.
@@ -282,3 +282,15 @@ Read [PACKET_LOGGING.md](PACKET_LOGGING.md).
 
 When packet logging is enabled, it records traceroute requests and responses at the same companion
 API boundary. The log can contain route hashes, node numbers, and signal data.
+
+## Connection manager and stream transports
+
+The [radio connection manager](RADIO_CONNECTIONS.md) filters saved/discovered radios by transport
+and protocol and keeps enabled radios independent of the selected outbound radio. The retry
+controller re-arms when an attempt fails without a new StateFlow emission.
+
+MeshCore USB/TCP uses host-to-radio `0x3c` plus a 16-bit little-endian length and response marker
+`0x3e` with the same length format. BLE carries unwrapped companion frames. Meshtastic serial
+and TCP use `0x94 0xc3` plus a 16-bit big-endian length and the standard wake sequence. Parsers
+buffer fragmented reads and bound payload sizes. Each source radio keeps its own backend,
+settings/action queues, framing, connection epoch, and packet-log label.

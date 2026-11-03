@@ -38,6 +38,7 @@ class DualMeshManager(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val packetLogger = PacketLogger(context)
     val scanner = BleRadioScanner(context)
+    val usbRadios = io.dualmesh.app.transport.UsbRadioCatalog(context)
     val meshCore = MultiDeviceBackend(
         context,
         MeshNetwork.MESHCORE,
@@ -66,6 +67,18 @@ class DualMeshManager(private val context: Context) {
     private val nodeMutex = Mutex()
     private val traceMutex = Mutex()
     private var autoReconnectStarted = false
+    private val _networkPermissionRequested = MutableStateFlow(false)
+    val networkPermissionRequested = _networkPermissionRequested.asStateFlow()
+    private var pendingNetworkProfile: ConnectionProfileStore.Profile? = null
+    private val _connectionNotice = MutableStateFlow<String?>(null)
+    val connectionNotice = _connectionNotice.asStateFlow()
+    fun onNetworkPermissionResult(granted: Boolean) {
+        val pending = pendingNetworkProfile
+        pendingNetworkProfile = null
+        _networkPermissionRequested.value = false
+        if (granted && pending != null) _connectionNotice.value = connect(pending).exceptionOrNull()?.message
+        else if (!granted) _connectionNotice.value = "Local network access denied. Enable the saved Wi-Fi radio or tap Retry to allow access."
+    }
 
     private val _selectedNetwork = MutableStateFlow(profileStore.loadSelectedNetwork())
     val selectedNetwork: StateFlow<MeshNetwork> = _selectedNetwork.asStateFlow()
@@ -177,7 +190,60 @@ class DualMeshManager(private val context: Context) {
         )
     }
 
+    fun connectTcp(network: MeshNetwork, endpoint: String, name: String = ""): Result<Unit> {
+        val parsed = io.dualmesh.app.transport.MeshtasticTcpSession.Endpoint.parse(endpoint, if (network == MeshNetwork.MESHCORE) 5000 else 4403)
+            .getOrElse { return Result.failure(it) }
+        val address = if (parsed.host.contains(':')) "[${parsed.host}]:${parsed.port}" else "${parsed.host}:${parsed.port}"
+        return connect(ConnectionProfileStore.Profile(network, ConnectionProfileStore.Transport.TCP, address, name.ifBlank { "${network.label} · $address" }))
+    }
+
+    fun connectUsb(network: MeshNetwork, target: io.dualmesh.app.transport.UsbRadioTarget) {
+        usbRadios.authorize(target) { result ->
+            result.onSuccess { resolved ->
+                val address = resolved.encode()
+                val existing = profileStore.loadAll(network).firstOrNull { it.transport == ConnectionProfileStore.Transport.USB && it.address == address }
+                val profile = existing ?: ConnectionProfileStore.Profile(network, ConnectionProfileStore.Transport.USB, address, "${network.label} USB · %04x:%04x".format(resolved.vendor, resolved.product))
+                usbRadios.report(connect(profile).exceptionOrNull()?.message)
+            }.onFailure { usbRadios.report(it.message) }
+        }
+    }
+
+    fun retryConnection(profile: ConnectionProfileStore.Profile): Result<Unit> {
+        if (profile.transport == ConnectionProfileStore.Transport.USB) {
+            val target = io.dualmesh.app.transport.UsbRadioTarget.parse(profile.address).getOrElse { return Result.failure(it) }
+            usbRadios.authorize(target) { result ->
+                result.onSuccess { usbRadios.report(connect(profile).exceptionOrNull()?.message) }
+                    .onFailure { usbRadios.report(it.message) }
+            }
+            return Result.success(Unit)
+        }
+        return connect(profile)
+    }
+
+    fun retryFailedConnections() { backends.values.forEach { it.retryFailed() } }
+
+    fun forgetConnection(profile: ConnectionProfileStore.Profile) {
+        disconnect(profile)
+        profileStore.forget(profile)
+        refreshConnectionHistory()
+    }
+
     fun connect(profile: ConnectionProfileStore.Profile): Result<Unit> {
+        if (profile.transport == ConnectionProfileStore.Transport.TCP && android.os.Build.VERSION.SDK_INT >= 37 &&
+            context.checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            pendingNetworkProfile = profile
+            profileStore.remember(profile)
+            refreshConnectionHistory()
+            _connectionNotice.value = "Allow local network access to connect the Wi-Fi radio."
+            _networkPermissionRequested.value = true
+            return Result.success(Unit)
+        }
+        _connectionNotice.value = null
+        usbRadios.report(null)
+        if (profile.transport == ConnectionProfileStore.Transport.BLE) scanner.stop()
+        if (profile.transport == ConnectionProfileStore.Transport.USB && backends.values.any { backend ->
+            backend.deviceConnections.value.any { it.profile.network != profile.network && it.profile.transport == profile.transport && it.profile.address == profile.address }
+        }) return Result.failure(IllegalStateException("This USB port is already enabled for the other mesh protocol"))
         val backend = backends.getValue(profile.network)
         val result = backend.add(profile, makeOutbound = true)
         if (result.isSuccess) {
@@ -352,6 +418,7 @@ class DualMeshManager(private val context: Context) {
 
     fun close() {
         scanner.stop()
+        usbRadios.close()
         backends.values.forEach(MessagingBackend::disconnect)
         scope.cancel()
         messageStore.close()

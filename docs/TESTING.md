@@ -27,7 +27,10 @@ The tests examine these functions:
 - Split Meshtastic frames and wake bytes.
 - Meshtastic frame recovery after invalid data.
 - Meshtastic TCP endpoint parsing.
-- A local TCP socket in both directions.
+- A local TCP socket in both directions for both companion protocols.
+- MeshCore USB/TCP framing fragmentation, coalescing, invalid-length recovery and bounded payloads.
+- Retry continuation when failures do not emit a new connection state, cancellation and backoff reset.
+- USB serial identities across replug, multi-port isolation, missing-serial fallback and saved profiles.
 - MQTT broker defaults, TLS and endpoint parsing, and per-channel downlink subscriptions.
 - MQTT binary/JSON envelopes, retained flags, implicit ACKs, and radio API size limits.
 - Local MQTT broker publishing, downlink, reconnect, session isolation, and teardown.
