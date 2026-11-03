@@ -176,7 +176,8 @@ The app does not use value `69420`. Meshtastic reserves this value for
 - A broadcast packet uses a `channel:<index>` conversation.
 - A direct packet uses a `contact:<node-id>` conversation.
 - A sent direct message uses channel 0 and requests an ACK.
-- A sent channel message uses a random nonzero packet ID.
+- A sent channel message uses a random nonzero packet ID and requests a mesh ACK.
+- Queue status and routing ACK/NAKs update the same stored message. See [message delivery](MESSAGE_DELIVERY.md) for status semantics and receive metadata.
 - The app permits a maximum message size of 220 bytes.
 - The backend also checks `Constants.DATA_PAYLOAD_LEN`.
 
@@ -237,7 +238,8 @@ all targets for that technology.
 (network, device_id, message_id)
 ```
 
-Database version 2 added the radio ID. Database version 3 added reaction fields. Both migrations
+Database version 2 added the radio ID. Database version 3 added reaction fields. Version 4 adds
+delivery detail, receive hop count, RF/MQTT source, signal readings, and route type. All migrations
 keep old message rows.
 
 The app loads history before it saves new backend messages. A history load does not create a new

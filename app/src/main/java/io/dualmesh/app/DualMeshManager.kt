@@ -431,7 +431,11 @@ class DualMeshManager(private val context: Context) {
         scope.launch {
             historyReady.await()
             historyMutex.withLock {
-                val resolvedMessage = resolveReactionConversation(message, _messages.value)
+                val previous = _messages.value.firstOrNull {
+                    it.network == message.network && it.deviceId == message.deviceId && it.id == message.id
+                }
+                val resolvedMessage = io.dualmesh.app.history.mergeMessageObservation(previous,
+                    resolveReactionConversation(message, _messages.value))
                 val newInMemory = _messages.value.none {
                     it.network == resolvedMessage.network &&
                         it.deviceId == resolvedMessage.deviceId &&

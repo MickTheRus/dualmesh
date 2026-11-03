@@ -1547,6 +1547,7 @@ private fun MessageBubble(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
+            MessageMetadata(message)
             ReactionStrip(reactions)
         }
     }

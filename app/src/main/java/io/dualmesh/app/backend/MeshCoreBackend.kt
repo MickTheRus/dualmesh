@@ -75,6 +75,14 @@ class MeshCoreBackend(
     private val tcpSession = io.dualmesh.app.transport.MeshtasticTcpSession(this, MeshNetwork.MESHCORE)
     private val usbSession = io.dualmesh.app.transport.UsbRadioSession(context, network, this)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val messageDelivery = io.dualmesh.app.messaging.MeshCoreMessageDelivery(
+        scheduler = SettingsScheduler { delay, action ->
+            val callback = Runnable(action)
+            mainHandler.postDelayed(callback, delay)
+            ({ mainHandler.removeCallbacks(callback) })
+        },
+        emit = { _incomingMessages.tryEmit(it) },
+    )
     private val settingsController: MeshCoreSettingsController = MeshCoreSettingsController(
         send = { frame ->
             if (_connectionState.value != ConnectionState.CONNECTED) false else {
@@ -83,7 +91,7 @@ class MeshCoreBackend(
         },
         ready = {
             _connectionState.value == ConnectionState.CONNECTED && !waitingForDeviceInfo &&
-                channelScanIndex == null && !waitingForContacts && !waitingForSetTime && pendingTraces.isEmpty() && !nodeActionsController.busy
+                channelScanIndex == null && !waitingForContacts && !waitingForSetTime && pendingTraces.isEmpty() && !nodeActionsController.busy && !messageDelivery.busy
         },
         channelCapacity = { _channelCapacity.value },
         scheduler = SettingsScheduler { delay, action ->
@@ -109,7 +117,7 @@ class MeshCoreBackend(
         ready = {
             _connectionState.value == ConnectionState.CONNECTED && !waitingForDeviceInfo &&
                 channelScanIndex == null && !waitingForContacts && !waitingForSetTime &&
-                pendingTraces.isEmpty() && !settingsController.busy
+                pendingTraces.isEmpty() && !settingsController.busy && !messageDelivery.busy
         },
         scheduler = SettingsScheduler { delay, action ->
             val callback = Runnable(action)
@@ -118,7 +126,7 @@ class MeshCoreBackend(
         },
         onContact = ::updateContact,
         onIdle = { mainHandler.post {
-            if (pendingContactSync && _connectionState.value == ConnectionState.CONNECTED && !nodeActionsController.busy) {
+            if (pendingContactSync && _connectionState.value == ConnectionState.CONNECTED && !nodeActionsController.busy && !messageDelivery.busy) {
                 pendingContactSync = false
                 beginContactSync()
             }
@@ -223,8 +231,14 @@ class MeshCoreBackend(
         }
     }
 
+    private var lastMessageSeconds = 0L
+    private fun nextMessageSeconds(): Int {
+        lastMessageSeconds = maxOf(System.currentTimeMillis() / 1000, lastMessageSeconds + 1)
+        return lastMessageSeconds.toInt()
+    }
+
     override fun sendChannelMessage(text: String, channel: Int): Result<Unit> {
-        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
+        if (messageDelivery.busy || settingsController.busy || nodeActionsController.busy || waitingForDeviceInfo || channelScanIndex != null || waitingForContacts || waitingForSetTime || pendingTraces.isNotEmpty()) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -233,13 +247,13 @@ class MeshCoreBackend(
                 IllegalArgumentException("MeshCore messages are limited to $maxMessageBytes UTF-8 bytes"),
             )
         }
-        val nowSeconds = (System.currentTimeMillis() / 1000).toInt()
+        val nowSeconds = nextMessageSeconds()
         if (!writeFrame(
             MeshCoreProtocol.channelMessage(channel, text, nowSeconds),
             "CMD_SEND_CHANNEL_TXT_MSG channel=$channel",
         )) return Result.failure(IllegalStateException("Radio transport is unavailable or busy"))
         val sender = selfName ?: "You"
-        _incomingMessages.tryEmit(
+        messageDelivery.track(
             UnifiedMessage(
                 id = MeshCoreProtocol.messageId(
                     conversationId = "channel:$channel",
@@ -260,7 +274,7 @@ class MeshCoreBackend(
     }
 
     override fun sendDirectMessage(text: String, contactId: String): Result<Unit> {
-        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
+        if (messageDelivery.busy || settingsController.busy || nodeActionsController.busy || waitingForDeviceInfo || channelScanIndex != null || waitingForContacts || waitingForSetTime || pendingTraces.isNotEmpty()) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -270,13 +284,13 @@ class MeshCoreBackend(
             )
         }
         val normalizedId = contactId.lowercase()
-        val nowSeconds = (System.currentTimeMillis() / 1000).toInt()
+        val nowSeconds = nextMessageSeconds()
         val frame = runCatching {
             MeshCoreProtocol.directMessage(normalizedId, text, nowSeconds)
         }.getOrElse { return Result.failure(it) }
         if (!writeFrame(frame, "CMD_SEND_TXT_MSG contact=${normalizedId.take(12)}")) return Result.failure(IllegalStateException("Radio transport is unavailable or busy"))
         val conversationId = "contact:$normalizedId"
-        _incomingMessages.tryEmit(
+        messageDelivery.track(
             UnifiedMessage(
                 id = MeshCoreProtocol.messageId(
                     conversationId = conversationId,
@@ -297,7 +311,7 @@ class MeshCoreBackend(
     }
 
     override fun traceRoute(contactId: String): Result<Unit> {
-        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
+        if (messageDelivery.busy || settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -423,6 +437,13 @@ class MeshCoreBackend(
             payload = value,
             summary = describeIncomingFrame(value),
         )
+        if (messageDelivery.receive(value)) {
+            if (pendingContactSync && !messageDelivery.busy && !nodeActionsController.busy) {
+                pendingContactSync = false
+                beginContactSync()
+            }
+            return
+        }
         nodeActionsController.observeDeviceInfo(value)
         if (nodeActionsController.receive(value)) return
         if (settingsController.receive(value)) return
@@ -491,7 +512,7 @@ class MeshCoreBackend(
                 if (message.sender == selfName) {
                     message.copy(
                         outgoing = true,
-                        deliveryState = DeliveryState.SENT_TO_RADIO,
+                        deliveryState = DeliveryState.RECEIVED,
                     )
                 } else {
                     message
@@ -502,7 +523,7 @@ class MeshCoreBackend(
             PUSH_CONTACT_UPDATED,
             PUSH_PATH_UPDATED,
             PUSH_NEW_ADVERT,
-            -> if (nodeActionsController.busy) pendingContactSync = true else beginContactSync()
+            -> if (nodeActionsController.busy || messageDelivery.busy) pendingContactSync = true else beginContactSync()
             MeshCoreProtocol.PUSH_MESSAGE_WAITING,
             MeshCoreProtocol.RESPONSE_CONTACT_MESSAGE,
             MeshCoreProtocol.RESPONSE_CHANNEL_MESSAGE,
@@ -705,6 +726,7 @@ class MeshCoreBackend(
     }
 
     private fun failPendingTraces(detail: String) {
+        messageDelivery.disconnect(detail)
         if (pendingTraces.isEmpty()) return
         val completedAt = System.currentTimeMillis()
         pendingTraces.values.forEach { pending ->

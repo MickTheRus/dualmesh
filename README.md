@@ -126,6 +126,7 @@ Refresh reads configuration without changing it.
 - Send and receive channel messages.
 - Send and receive direct messages.
 - Show Meshtastic reactions below the related message.
+- Show per-message delivery confirmations, RF/MQTT source, and reported receive hop counts.
 - Save the newest 5,000 messages in SQLite.
 - Save node details and the latest node positions for each radio.
 - Search the node directory for each selected radio.
@@ -146,8 +147,9 @@ Refresh reads configuration without changing it.
 - A radio can discard a queued packet before DualMesh receives it.
 - Meshtastic keeps its normal app queue in node RAM.
 - A node restart or deep sleep can remove queued Meshtastic packets.
-- A sent state only means that the app gave the message to the radio.
-- The app does not show a final mesh delivery receipt.
+- Sent is separate from confirmed delivery; channel ACKs confirm the mesh, not every recipient.
+- Delivery confirms a radio acknowledgement, not that a person read the message.
+- MeshCore channel broadcasts do not support delivery acknowledgements.
 - Android or the device vendor can stop background start operations.
 - Open DualMesh if Android does not restore the service after device start.
 - The app saves a maximum of 12 known targets for each mesh technology.
@@ -216,6 +218,7 @@ debug signing. It is not a production release.
 - [Visual design](docs/DESIGN.md)
 - [Protocol design](docs/PROTOCOLS.md)
 - [Nodes, contacts, and maps](docs/NODES_AND_MAPS.md)
+- [Message delivery](docs/MESSAGE_DELIVERY.md)
 - [Radio connections](docs/RADIO_CONNECTIONS.md)
 - [Radio settings](docs/RADIO_SETTINGS.md)
 - [Packet logs](docs/PACKET_LOGGING.md)

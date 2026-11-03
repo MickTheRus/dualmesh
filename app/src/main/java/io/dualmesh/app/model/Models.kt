@@ -16,6 +16,10 @@ enum class DeliveryState {
     RECEIVED,
     SENDING,
     SENT_TO_RADIO,
+    SENT,
+    DELIVERED_TO_MESH,
+    DELIVERED,
+    UNCONFIRMED,
     ERROR,
 }
 
@@ -107,6 +111,12 @@ data class UnifiedMessage(
     val deviceName: String? = null,
     val reactionToMessageId: String? = null,
     val reactionEmoji: String? = null,
+    val hopsAway: Int? = null,
+    val viaMqtt: Boolean? = null,
+    val snr: Float? = null,
+    val rssi: Int? = null,
+    val receptionPath: String? = null,
+    val deliveryDetail: String? = null,
 ) {
     val isReaction: Boolean
         get() = reactionToMessageId != null && reactionEmoji != null

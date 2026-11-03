@@ -8,6 +8,7 @@ import io.dualmesh.app.ble.GattSession
 import io.dualmesh.app.logging.PacketDirection
 import io.dualmesh.app.logging.PacketLogger
 import io.dualmesh.app.model.ConnectionState
+import io.dualmesh.app.messaging.messageHops
 import io.dualmesh.app.model.DeliveryState
 import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
@@ -91,6 +92,15 @@ class MeshtasticBackend(
     private val tcpSession = MeshtasticTcpSession(this)
     private val usbSession = io.dualmesh.app.transport.UsbRadioSession(context, network, this)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val messageDelivery = io.dualmesh.app.messaging.MeshtasticMessageDelivery(
+        scheduler = SettingsScheduler { delay, action ->
+            val callback = Runnable(action)
+            mainHandler.postDelayed(callback, delay)
+            ({ mainHandler.removeCallbacks(callback) })
+        },
+        emit = { _incomingMessages.tryEmit(it) },
+        localNode = { myNodeNum },
+    )
     private val settingsController: MeshtasticSettingsController = MeshtasticSettingsController(
         send = { sendTransport(it) },
         readyNode = { myNodeNum.takeIf { configReady && _connectionState.value == ConnectionState.CONNECTED && !nodeActionsController.busy } },
@@ -228,14 +238,14 @@ class MeshtasticBackend(
             channel = channel,
             decoded = data,
             id = packetId,
-            hop_limit = 3,
-            hop_start = 3,
-            want_ack = false,
+            hop_limit = loraConfig?.hop_limit ?: 3,
+            hop_start = loraConfig?.hop_limit ?: 3,
+            want_ack = true,
         )
         if (!sendTransport(ToRadio(packet = packet).encode())) {
             return Result.failure(IllegalStateException("Meshtastic transport is unavailable"))
         }
-        _incomingMessages.tryEmit(
+        messageDelivery.track(
             UnifiedMessage(
                 id = packetId.toString(),
                 network = network,
@@ -275,15 +285,15 @@ class MeshtasticBackend(
             channel = 0,
             decoded = data,
             id = packetId,
-            hop_limit = 3,
-            hop_start = 3,
+            hop_limit = loraConfig?.hop_limit ?: 3,
+            hop_start = loraConfig?.hop_limit ?: 3,
             want_ack = true,
         )
         if (!sendTransport(ToRadio(packet = packet).encode())) {
             return Result.failure(IllegalStateException("Meshtastic transport is unavailable"))
         }
         val normalizedId = destination.toUInt().toString()
-        _incomingMessages.tryEmit(
+        messageDelivery.track(
             UnifiedMessage(
                 id = packetId.toUInt().toString(),
                 network = network,
@@ -436,6 +446,7 @@ class MeshtasticBackend(
 
     private fun handleFromRadio(fromRadio: FromRadio) {
         if (Looper.myLooper() != Looper.getMainLooper()) { onMain { handleFromRadio(fromRadio) }; return }
+        messageDelivery.receive(fromRadio)
         settingsController.observe(fromRadio)
         fromRadio.moduleConfig?.mqtt?.let {
             mqttConfig = it
@@ -570,6 +581,10 @@ class MeshtasticBackend(
                 deliveryState = DeliveryState.RECEIVED,
                 reactionToMessageId = metadata.reactionToMessageId,
                 reactionEmoji = metadata.reactionEmoji,
+                hopsAway = if (outgoing) null else packet.messageHops(),
+                viaMqtt = if (outgoing) null else packet.via_mqtt,
+                snr = if (outgoing) null else packet.rx_snr.takeIf { it != 0f },
+                rssi = if (outgoing) null else packet.rx_rssi.takeIf { it != 0 },
             ),
         )
     }
@@ -726,6 +741,7 @@ class MeshtasticBackend(
     }
 
     private fun failPendingTraces(detail: String) {
+        messageDelivery.disconnect(detail)
         if (pendingTraces.isEmpty()) return
         val completedAt = System.currentTimeMillis()
         pendingTraces.values.forEach { pending ->

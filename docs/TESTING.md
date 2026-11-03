@@ -22,6 +22,14 @@ The tests examine these functions:
 - MeshCore legacy and version 3 message parsing.
 - MeshCore channel and device capacity.
 - Stable message IDs.
+- Meshtastic queue/relay/recipient ACK distinctions, routing failures, late ACKs, timeout/reset,
+  and per-radio delivery isolation.
+- MeshCore send-command ownership, ACK-code matching, suggested timeouts,
+  channel-send semantics, and stale timeout callbacks.
+- Message hop metadata, signed MeshCore SNR, direct-route unknown hops, and delivery/metadata
+  preservation across radio echoes.
+- Device-side message history metadata round trips, delivery updates without duplicate rows,
+  migrations from versions 1/2/3, and interrupted confirmation handling.
 - 10,000 random invalid MeshCore frames.
 - Meshtastic Stream API frames.
 - Split Meshtastic frames and wake bytes.
