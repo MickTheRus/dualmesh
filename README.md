@@ -8,6 +8,12 @@ Meshtastic nodes.
 DualMesh keeps the two mesh protocols separate. It does not forward traffic from one mesh to the
 other mesh.
 
+## Android download
+
+[Download DualMesh 0.1.0](https://github.com/MickTheRus/dualmesh/releases/tag/v0.1.0)
+from this fork's releases. The installable APK requires Android 8.0 or newer and uses the same
+development signing certificate as the locally installed builds. Its SHA-256 checksum is included.
+
 ## Screenshots
 
 The current phone and tablet screens use fictional data from an isolated screenshot build.
