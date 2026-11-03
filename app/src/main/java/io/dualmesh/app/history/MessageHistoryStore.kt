@@ -46,6 +46,13 @@ class MessageHistoryStore(
                 delivery_state TEXT NOT NULL,
                 reaction_to_message_id TEXT,
                 reaction_emoji TEXT,
+                hops_away INTEGER,
+                via_mqtt INTEGER,
+                snr REAL,
+                rssi INTEGER,
+                reception_path TEXT,
+                delivery_detail TEXT,
+                channel_index INTEGER,
                 PRIMARY KEY (network, device_id, message_id)
             )
             """.trimIndent(),
@@ -92,13 +99,21 @@ class MessageHistoryStore(
             database.execSQL(
                 "ALTER TABLE $TABLE_MESSAGES ADD COLUMN reaction_emoji TEXT",
             )
-            return
         }
+        if (oldVersion < 4 && newVersion >= 4) {
+            listOf("hops_away INTEGER", "via_mqtt INTEGER", "snr REAL", "rssi INTEGER", "reception_path TEXT", "delivery_detail TEXT").forEach {
+                database.execSQL("ALTER TABLE $TABLE_MESSAGES ADD COLUMN $it")
+            }
+        }
+        if (oldVersion < 5 && newVersion >= 5) database.execSQL("ALTER TABLE $TABLE_MESSAGES ADD COLUMN channel_index INTEGER")
+        if (oldVersion in 2..4 && newVersion <= DATABASE_VERSION) return
         error("No message database migration from $oldVersion to $newVersion")
     }
 
     suspend fun loadMessages(limit: Int = MAX_STORED_MESSAGES): List<UnifiedMessage> =
         withContext(Dispatchers.IO) {
+            // Pending ACK timers cannot survive process death. Preserve history without claiming delivery.
+            writableDatabase.execSQL("UPDATE $TABLE_MESSAGES SET delivery_state = 'UNCONFIRMED', delivery_detail = 'Delivery confirmation was interrupted by an app restart.' WHERE outgoing = 1 AND (delivery_state IN ('SENDING', 'SENT_TO_RADIO') OR (delivery_state = 'SENT' AND (network = 'MESHTASTIC' OR conversation_id LIKE 'contact:%')))")
             val messages = mutableListOf<UnifiedMessage>()
             readableDatabase.query(
                 TABLE_MESSAGES,
@@ -132,6 +147,13 @@ class MessageHistoryStore(
                         it.name == cursor.getString(deliveryColumn)
                     } ?: DeliveryState.ERROR
                     messages += UnifiedMessage(
+                        channelIndex = cursor.getColumnIndexOrThrow("channel_index").let { if (cursor.isNull(it)) null else cursor.getInt(it) },
+                        hopsAway = cursor.getColumnIndexOrThrow("hops_away").let { if (cursor.isNull(it)) null else cursor.getInt(it) },
+                        viaMqtt = cursor.getColumnIndexOrThrow("via_mqtt").let { if (cursor.isNull(it)) null else cursor.getInt(it) != 0 },
+                        snr = cursor.getColumnIndexOrThrow("snr").let { if (cursor.isNull(it)) null else cursor.getFloat(it) },
+                        rssi = cursor.getColumnIndexOrThrow("rssi").let { if (cursor.isNull(it)) null else cursor.getInt(it) },
+                        receptionPath = cursor.getString(cursor.getColumnIndexOrThrow("reception_path")),
+                        deliveryDetail = cursor.getString(cursor.getColumnIndexOrThrow("delivery_detail")),
                         id = cursor.getString(idColumn),
                         network = network,
                         conversationId = cursor.getString(conversationColumn),
@@ -215,12 +237,19 @@ class MessageHistoryStore(
         put("delivery_state", deliveryState.name)
         put("reaction_to_message_id", reactionToMessageId)
         put("reaction_emoji", reactionEmoji)
+        put("hops_away", hopsAway)
+        put("via_mqtt", viaMqtt?.let { if (it) 1 else 0 })
+        put("snr", snr)
+        put("rssi", rssi)
+        put("reception_path", receptionPath)
+        put("delivery_detail", deliveryDetail)
+        put("channel_index", channelIndex)
     }
 
     companion object {
         const val MAX_STORED_MESSAGES = 5_000
         private const val DATABASE_NAME = "dualmesh_messages.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 5
         private const val TABLE_MESSAGES = "messages"
         private val COLUMNS = arrayOf(
             "network",
@@ -235,6 +264,7 @@ class MessageHistoryStore(
             "delivery_state",
             "reaction_to_message_id",
             "reaction_emoji",
+            "hops_away", "via_mqtt", "snr", "rssi", "reception_path", "delivery_detail", "channel_index",
         )
     }
 }

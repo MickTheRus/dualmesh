@@ -1,6 +1,7 @@
 package io.dualmesh.app.transport
 
 import io.dualmesh.app.protocol.MeshtasticStreamCodec
+import io.dualmesh.app.model.MeshNetwork
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class MeshtasticTcpSession(
     private val listener: Listener,
+    private val network: MeshNetwork = MeshNetwork.MESHTASTIC,
 ) {
     interface Listener {
         fun onTcpConnected()
@@ -26,6 +28,7 @@ class MeshtasticTcpSession(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeLock = Any()
     private val pendingWrites = AtomicInteger()
+    private val framing = RadioStreamFraming(network) {}
     private var connectionJob: Job? = null
     @Volatile private var socket: Socket? = null
     @Volatile private var generation = 0L
@@ -36,7 +39,7 @@ class MeshtasticTcpSession(
         connectionJob = scope.launch {
             val activeSocket = Socket()
             socket = activeSocket
-            val codec = MeshtasticStreamCodec(listener::onTcpPacket)
+            val codec = RadioStreamFraming(network, listener::onTcpPacket)
             var connected = false
             var failed = false
             try {
@@ -47,8 +50,9 @@ class MeshtasticTcpSession(
                     CONNECT_TIMEOUT_MS,
                 )
                 synchronized(writeLock) {
+                    if (connectionGeneration != generation || activeSocket !== socket) return@launch
                     activeSocket.getOutputStream().apply {
-                        write(MeshtasticStreamCodec.WAKE_BYTES)
+                        write(codec.wakeBytes)
                         flush()
                     }
                 }
@@ -60,7 +64,7 @@ class MeshtasticTcpSession(
                 while (isActive && connectionGeneration == generation) {
                     val count = input.read(buffer)
                     if (count < 0) break
-                    codec.accept(buffer, count)
+                    if (connectionGeneration == generation && socket === activeSocket) codec.accept(buffer, count)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -88,7 +92,7 @@ class MeshtasticTcpSession(
     fun send(payload: ByteArray, bounded: Boolean = false): Boolean {
         val activeSocket = socket?.takeIf { it.isConnected && !it.isClosed } ?: return false
         val sendGeneration = generation
-        val frame = runCatching { MeshtasticStreamCodec.frame(payload) }.getOrNull() ?: return false
+        val frame = runCatching { framing.frame(payload) }.getOrNull() ?: return false
         if (pendingWrites.incrementAndGet() > 32 && bounded) {
             pendingWrites.decrementAndGet()
             return false
@@ -96,6 +100,7 @@ class MeshtasticTcpSession(
         scope.launch {
             runCatching {
                 synchronized(writeLock) {
+                    if (sendGeneration != generation || activeSocket !== socket) return@synchronized
                     activeSocket.getOutputStream().apply {
                         write(frame)
                         flush()
@@ -126,12 +131,13 @@ class MeshtasticTcpSession(
 
     data class Endpoint(val host: String, val port: Int) {
         override fun toString(): String =
-            if (port == MeshtasticStreamCodec.DEFAULT_PORT) host else "$host:$port"
+            if (host.contains(':')) "[$host]:$port" else if (port == MeshtasticStreamCodec.DEFAULT_PORT) host else "$host:$port"
 
         companion object {
-            fun parse(value: String): Result<Endpoint> = runCatching {
+            fun parse(value: String, defaultPort: Int = MeshtasticStreamCodec.DEFAULT_PORT): Result<Endpoint> = runCatching {
                 val input = value.trim()
-                require(input.isNotEmpty()) { "Enter a Meshtastic hostname or IP address" }
+                require(input.isNotEmpty()) { "Enter a hostname or IP address" }
+                require(!input.contains("://") && input.none(Char::isWhitespace)) { "Use a hostname or IP address, without a URL scheme or spaces" }
                 val host: String
                 val port: Int
                 if (input.startsWith("[")) {
@@ -142,14 +148,14 @@ class MeshtasticTcpSession(
                         require(input[close + 1] == ':') { "Invalid TCP endpoint" }
                         input.substring(close + 2).toInt()
                     } else {
-                        MeshtasticStreamCodec.DEFAULT_PORT
+                        defaultPort
                     }
                 } else if (input.count { it == ':' } == 1) {
                     host = input.substringBefore(':')
                     port = input.substringAfter(':').toInt()
                 } else {
                     host = input
-                    port = MeshtasticStreamCodec.DEFAULT_PORT
+                    port = defaultPort
                 }
                 require(host.isNotBlank()) { "Hostname cannot be empty" }
                 require(port in 1..65535) { "TCP port must be between 1 and 65535" }

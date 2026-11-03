@@ -9,6 +9,8 @@ private.
 | --- | --- | --- |
 | MeshCore BLE | Selected companion radio | Commands, messages, contacts, and adverts |
 | Meshtastic BLE | Selected Meshtastic radio | `ToRadio` and `FromRadio` API |
+| MeshCore TCP | User-entered endpoint | Companion API, usually port `5000` |
+| USB serial | User-selected attached radio | Companion or Meshtastic API over USB host |
 | Meshtastic TCP | Endpoint that the user enters | TCP Stream API, usually port `4403` |
 | Meshtastic MQTT proxy | Broker configured on each radio | MQTT uplink and downlink over the phone's Internet connection |
 | Map tiles | OpenStreetMap servers | Map background |
@@ -20,7 +22,7 @@ forward traffic between MeshCore and Meshtastic.
 A map request gives the tile provider the public IP address and the requested map area. Do not open
 the map if this data must stay private.
 
-The Meshtastic TCP connection does not add TLS. Use it on a trusted network or through a trusted
+TCP connections do not add TLS. Use it on a trusted network or through a trusted
 VPN. Bluetooth protection depends on Android, the radio, and the radio settings.
 
 When a radio enables MQTT and its client proxy, DualMesh connects to that radio's configured
@@ -43,7 +45,7 @@ capture configuration and admin payloads including credentials and key material.
 
 DualMesh stores these items:
 
-- BLE addresses and TCP endpoints
+- BLE addresses, TCP endpoints, and USB vendor/product/port/serial identities
 - selected radios and conversations
 - phone layout settings
 - a maximum of 5,000 messages in `dualmesh_messages.db`
@@ -140,3 +142,7 @@ Use these test values:
 
 Before publication, search for host names, IP addresses, BLE addresses, node IDs, channel names,
 coordinates, messages, screenshots, counts, and device details.
+
+Radio management requests USB access only after an explicit selection or Retry. Automatic retries
+do not open USB permission prompts. Android 17 local-network access is requested when connecting
+a Wi-Fi/TCP radio. See [radio connections](RADIO_CONNECTIONS.md) for identity and permission behavior.

@@ -274,17 +274,18 @@ object MeshCoreProtocol {
         val code = frame[0].toInt() and 0xff
         var cursor = 1
         val channel: Int
+        val encodedPathLength: Int
         if (code == RESPONSE_CHANNEL_MESSAGE_V3) {
             if (frame.size < 11) return null
             cursor++ // SNR
             cursor++ // reserved
             cursor++ // reserved
             channel = frame[cursor++].toInt() and 0xff
-            cursor++ // encoded path length metadata; path bytes are not included
+            encodedPathLength = frame[cursor++].toInt() and 255
         } else {
             if (frame.size < 8) return null
             channel = frame[cursor++].toInt() and 0xff
-            cursor++ // path length (legacy frames do not include the path bytes)
+            encodedPathLength = frame[cursor++].toInt() and 255
         }
         if (cursor + 5 > frame.size) return null
         val textType = frame[cursor++].toInt() and 0xff
@@ -301,6 +302,11 @@ object MeshCoreProtocol {
             sender = sender,
             text = text,
             timestampMillis = timestamp.takeIf { it > 0 }?.times(1000) ?: nowMillis,
+        ).copy(
+            hopsAway = encodedPathLength.takeUnless { it == 255 }?.and(63),
+            viaMqtt = false,
+            snr = if (code == RESPONSE_CHANNEL_MESSAGE_V3 || code == RESPONSE_CONTACT_MESSAGE_V3) frame[1].toInt() / 4f else null,
+            receptionPath = if (encodedPathLength == 255) "Direct route" else "Flood",
         )
     }
 
@@ -310,7 +316,7 @@ object MeshCoreProtocol {
         if (cursor + 12 > frame.size) return null
         val senderPrefix = frame.copyOfRange(cursor, cursor + 6).toHex()
         cursor += 6
-        cursor++ // path length
+        val encodedPathLength = frame[cursor++].toInt() and 255
         val textType = frame[cursor++].toInt() and 0xff
         val timestamp = readLittleEndianInt(frame, cursor).toLong() and 0xffffffffL
         cursor += 4
@@ -324,6 +330,11 @@ object MeshCoreProtocol {
             sender = senderPrefix,
             text = text,
             timestampMillis = timestamp.takeIf { it > 0 }?.times(1000) ?: nowMillis,
+        ).copy(
+            hopsAway = encodedPathLength.takeUnless { it == 255 }?.and(63),
+            viaMqtt = false,
+            snr = if (code == RESPONSE_CHANNEL_MESSAGE_V3 || code == RESPONSE_CONTACT_MESSAGE_V3) frame[1].toInt() / 4f else null,
+            receptionPath = if (encodedPathLength == 255) "Direct route" else "Flood",
         )
     }
 

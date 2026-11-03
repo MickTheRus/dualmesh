@@ -10,7 +10,10 @@ import io.dualmesh.app.model.UnifiedMessage
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
+private val noConnectionError = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
 interface MessagingBackend {
+    val connectionError: StateFlow<String?> get() = noConnectionError
     val contactRoutes: io.dualmesh.app.nodes.ContactRoutes? get() = null
     val nodeActions: io.dualmesh.app.nodes.NodeActions? get() = null
     val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess? get() = null
@@ -31,5 +34,7 @@ interface MessagingBackend {
     fun selectChannel(index: Int)
     fun sendChannelMessage(text: String, channel: Int = 0): Result<Unit>
     fun sendDirectMessage(text: String, contactId: String): Result<Unit>
+    fun sendReaction(message: UnifiedMessage, emoji: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("${network.label} does not support native message reactions"))
     fun traceRoute(contactId: String): Result<Unit>
 }

@@ -22,12 +22,23 @@ The tests examine these functions:
 - MeshCore legacy and version 3 message parsing.
 - MeshCore channel and device capacity.
 - Stable message IDs.
+- Meshtastic queue/relay/recipient ACK distinctions, routing failures, late ACKs, timeout/reset,
+  and per-radio delivery isolation.
+- MeshCore send-command ownership, ACK-code matching, suggested timeouts,
+  channel-send semantics, and stale timeout callbacks.
+- Message hop metadata, signed MeshCore SNR, direct-route unknown hops, and delivery/metadata
+  preservation across radio echoes.
+- Device-side message history metadata round trips, delivery updates without duplicate rows,
+  migrations from versions 1/2/3/4, and interrupted confirmation handling.
 - 10,000 random invalid MeshCore frames.
 - Meshtastic Stream API frames.
 - Split Meshtastic frames and wake bytes.
 - Meshtastic frame recovery after invalid data.
 - Meshtastic TCP endpoint parsing.
-- A local TCP socket in both directions.
+- A local TCP socket in both directions for both companion protocols.
+- MeshCore USB/TCP framing fragmentation, coalescing, invalid-length recovery and bounded payloads.
+- Retry continuation when failures do not emit a new connection state, cancellation and backoff reset.
+- USB serial identities across replug, multi-port isolation, missing-serial fallback and saved profiles.
 - MQTT broker defaults, TLS and endpoint parsing, and per-channel downlink subscriptions.
 - MQTT binary/JSON envelopes, retained flags, implicit ACKs, and radio API size limits.
 - Local MQTT broker publishing, downlink, reconnect, session isolation, and teardown.
@@ -44,6 +55,9 @@ The tests examine these functions:
 - Map filters across both technologies and source radios, unknown-name rules, MQTT and direct
   filters, last-heard boundaries, infrastructure roles, and coordinate validity.
 - Connection-profile storage.
+- Native reaction packet encode/decode, unsigned reply IDs, channel/DM addressing, configured hop
+  limit/ACK request, multi-codepoint emoji payloads, validation, per-radio duplicate prevention,
+  scoped attachment, and failed-attempt replacement.
 - Meshtastic reaction detection.
 - Meshtastic reaction attachment and duplicate removal.
 
@@ -103,7 +117,7 @@ channel users before you transmit test data.
 Use a private test mesh or coordinate the test with its users. A traceroute uses RF airtime.
 
 1. Select one connected radio.
-2. Open **Nodes / Map**.
+2. Open the **Nodes** tab.
 3. Select **Trace** on one remote node.
 4. Make sure that the row shows `Trace in progress`.
 5. Make sure that a response changes the state to `Trace complete`.
@@ -126,7 +140,7 @@ Do not use repeated traceroutes as a load test on a shared mesh.
 
 ## Packet-log test
 
-1. Open **Packets**.
+1. Open **Settings > Packet logs**.
 2. Enable both networks.
 3. Reconnect the radios.
 4. Do not transmit during the initial capture.
@@ -138,9 +152,19 @@ Do not use repeated traceroutes as a load test on a shared mesh.
 10. Make sure that the file does not increase in size.
 11. Make sure that the file stays in Downloads.
 
+## Channels navigation check
+
+Channels should show the radio name/status, chat selector, message history, and composer.
+Confirm that Manage, Disconnect, radio Settings, and Nodes/Map shortcuts are absent. Select a
+radio under Connections and confirm that the channel pane's read-only status changes. Open
+Settings to change the phone layout or inspect packet logs. Back from a settings editor should
+return to the Settings tab; chat selection and drafts should survive tab changes.
+
+Documentation images use a separate fixture package: see [screenshot capture](SCREENSHOTS.md).
+
 ## Layout test
 
-1. Open **View**.
+1. Open **Settings > Phone layout**.
 2. Select **Focused**.
 3. Change the selected network.
 4. Stop and restart the app.
@@ -153,7 +177,7 @@ Do not use repeated traceroutes as a load test on a shared mesh.
 
 ## Node test
 
-1. Select **Nodes / Map** for each radio.
+1. Open the **Nodes** tab.
 2. Use **Filters > Radio** to compare the node count with one radio, then select **All radios**.
 3. Toggle MC and MT independently and compare the position count with the visible markers.
 4. Examine marker names, node IDs, hop data, SNR, and coordinates.

@@ -2,13 +2,13 @@
 
 ## Node list and shared map
 
-Open **Nodes** in the app header or **Nodes / Map** in a network pane. The compact list includes
+Open the **Nodes** tab. The compact list includes
 saved nodes from both technologies and all radios. Each row shows its short-name badge, name,
 source radio, role, last heard, and available hop/SNR data. **Sort** orders by last heard, name,
 hops, or signal; unknown hop/signal values sort last. Tap a row for node details and trace history.
-Back returns to the list with its scroll position preserved. Select **Map** to show positions. **Both**, **MC**, and **MT** select which networks appear.
+Back returns to the list with its scroll position preserved. Select the **Map** tab to show positions. **Both**, **MC**, and **MT** select which networks appear.
 MC markers are purple; MT markers are green. Tap a marker for its details and traceroute action.
-**Fit nodes** frames the current results; incoming updates preserve the camera you chose.
+**Fit nodes** frames the current results; incoming updates and tab switches preserve the camera you chose.
 **Nodes** returns to the same filtered list, including nodes without valid positions. **Show on
 map** centers a positioned node. Traces always use that node's network and source radio.
 
@@ -185,7 +185,7 @@ restore the database. Packet logs in Downloads are separate files.
 
 ## Phone and tablet map
 
-Select **Nodes / Map** in a network pane.
+Select the **Map** tab.
 
 The panel shows:
 
@@ -196,11 +196,10 @@ The panel shows:
 - one marker for each positioned node
 - a search field across the enabled networks and radios
 - node identity and radio data
-- a **Trace** control for each available remote node.
+- grouped node details and a **Trace route** action for each available remote node.
 
 Search by node name, short name, ID, public key, role, hardware, hop count, or source. Use
-`channel 2` or `ch 2` to find nodes on a channel. The result count changes as you type. The
-**Trace** control stays next to each result.
+`channel 2` or `ch 2` to find nodes on a channel. The result count changes as you type. Open a result for its **Trace route** action.
 
 Phones can use the Focused or Stacked layout. Tablets show both network panes. The shared map
 uses its own network and radio filters independently of the radio selected for sending messages.

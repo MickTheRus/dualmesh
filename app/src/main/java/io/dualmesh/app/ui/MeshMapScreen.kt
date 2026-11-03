@@ -1,5 +1,6 @@
 package io.dualmesh.app.ui
 
+import androidx.activity.compose.BackHandler
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -48,7 +49,15 @@ private data class NodeActionTarget(val network: MeshNetwork, val deviceId: Stri
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean = true, onDismiss: () -> Unit) {
+internal fun MeshMapDialog(
+    manager: DualMeshManager,
+    initialDirectory: Boolean = true,
+    embedded: Boolean = false,
+    onNavigateMap: ((MeshNode) -> Unit)? = null,
+    onNavigateNodes: (() -> Unit)? = null,
+    focusNodeKey: String? = null,
+    onDismiss: () -> Unit,
+) {
     val nodes by manager.nodes.collectAsStateWithLifecycle()
     val mcConnections by manager.meshCore.deviceConnections.collectAsStateWithLifecycle()
     val mtConnections by manager.meshtastic.deviceConnections.collectAsStateWithLifecycle()
@@ -114,23 +123,28 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
             traces = traces.filter { it.network == node.network && it.deviceId == node.deviceId && it.targetId == node.id },
             traceEnabled = traceEnabled(node),
             onTrace = { traceError = manager.traceRoute(node.network, node.deviceId, node.id).exceptionOrNull()?.message },
-            onMap = { selectedKey = mapNodeKey(node); showNodeDetails = false; showDirectory = false },
+            onMap = {
+                showNodeDetails = false
+                if (onNavigateMap != null) onNavigateMap(node)
+                else { selectedKey = mapNodeKey(node); showDirectory = false }
+            },
             onStats = if (node.network == MeshNetwork.MESHTASTIC && connected(node)) ({ actionTarget = NodeActionTarget(node.network, node.deviceId, node.deviceName, node.id) }) else null,
             onRoute = if (node.network == MeshNetwork.MESHCORE && connected(node)) ({ routeNode = node }) else null,
         )
     }
 
-    Dialog(
-        onDismissRequest = { if (selected != null) selectedKey = null else onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
+    LaunchedEffect(focusNodeKey) {
+        if (focusNodeKey != null) selectedKey = focusNodeKey
+    }
+    BackHandler(embedded && !showDirectory && selected != null && !showNodeDetails && !showFilters && routeNode == null && actionTarget == null) { selectedKey = null }
+    ScreenPresentation(embedded, { if (selected != null) selectedKey = null else onDismiss() }) {
         MaterialTheme(typography = Typography()) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Column(Modifier.fillMaxSize().then(if (embedded) Modifier else Modifier.safeDrawingPadding())) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (showDirectory) "Nodes (${visible.size})" else "Mesh map", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     TextButton(onClick = { showFilters = true }) { Text("Filters") }
-                    TextButton(onClick = onDismiss) { Text("Close") }
+                    if (!embedded) TextButton(onClick = onDismiss) { Text("Close") }
                 }
                 OutlinedTextField(
                     value = query, onValueChange = { query = it },
@@ -154,8 +168,10 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
                     FilterChip(selected = filters.meshtastic, onClick = { update(filters.copy(meshtastic = !filters.meshtastic)) }, label = { Text("MT · Meshtastic") })
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { showDirectory = true; selectedKey = null }, enabled = !showDirectory) { Text("Nodes") }
-                    TextButton(onClick = { showDirectory = false; selectedKey = null }, enabled = showDirectory) { Text("Map") }
+                    if (!embedded) {
+                        TextButton(onClick = { showDirectory = true; selectedKey = null }, enabled = !showDirectory) { Text("Nodes") }
+                        TextButton(onClick = { showDirectory = false; selectedKey = null }, enabled = showDirectory) { Text("Map") }
+                    }
                     Spacer(Modifier.weight(1f))
                     if (showDirectory) Box {
                         TextButton(onClick = { sortMenu = true }) { Text("Sort") }
@@ -211,7 +227,7 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
                         verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.End,
                     ) {
                         FilledTonalButton(onClick = { fitRequest++ }, enabled = positioned.isNotEmpty()) { Text("Fit nodes") }
-                        FilledTonalButton(onClick = { showDirectory = true }) { Text("Nodes (${visible.size})") }
+                        FilledTonalButton(onClick = { if (onNavigateNodes != null) onNavigateNodes() else showDirectory = true }) { Text("Nodes (${visible.size})") }
                     }
                     if (positioned.isEmpty()) {
                         Surface(
@@ -345,7 +361,8 @@ private fun MeshNodeMap(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var styleRevision by remember { mutableIntStateOf(0) }
-    var hasFitted by remember { mutableStateOf(false) }
+    var camera by rememberSaveable { mutableStateOf<ArrayList<Double>?>(null) }
+    var hasFitted by remember { mutableStateOf(camera != null) }
     val onSelectCurrent by rememberUpdatedState(onSelect)
     val markerNodes = remember { mutableMapOf<Long, MeshNode>() }
     val icons = remember(context) { mutableMapOf<String, Icon>() }
@@ -356,6 +373,16 @@ private fun MeshNodeMap(
                 ready.setOnMarkerClickListener { marker ->
                     markerNodes[marker.id]?.let(onSelectCurrent)
                     true
+                }
+                camera?.let { saved ->
+                    ready.cameraPosition = org.maplibre.android.camera.CameraPosition.Builder()
+                        .target(LatLng(saved[0], saved[1])).zoom(saved[2]).bearing(saved[3]).tilt(saved[4]).build()
+                }
+                ready.addOnCameraIdleListener {
+                    val position = ready.cameraPosition
+                    position.target?.let { target ->
+                        camera = arrayListOf(target.latitude, target.longitude, position.zoom, position.bearing, position.tilt)
+                    }
                 }
                 map = ready
             }
@@ -398,30 +425,33 @@ private fun MeshNodeMap(
             markerNodes[marker.id] = node
         }
         if (!hasFitted && nodes.isNotEmpty()) {
-            fitMapNodes(ready, nodes)
+            fitMapNodes(ready, nodes, (80 * context.resources.displayMetrics.density).toInt().coerceAtMost(minOf(mapView.width, mapView.height).coerceAtLeast(0) / 3))
             hasFitted = true
         }
     }
     LaunchedEffect(map, fitRequest) {
-        if (fitRequest > 0) map?.let { fitMapNodes(it, nodes) }
+        if (fitRequest > 0) map?.let { fitMapNodes(it, nodes, (80 * context.resources.displayMetrics.density).toInt().coerceAtMost(minOf(mapView.width, mapView.height).coerceAtLeast(0) / 3)) }
     }
+    var lastSelectionKey by rememberSaveable { mutableStateOf<String?>(null) }
     val selectionKey = selected?.let(::mapNodeKey)
     LaunchedEffect(map, selectionKey) {
-        if (selected?.hasValidMapPosition() == true) {
-            map?.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(selected.latitude!!, selected.longitude!!), 13.0))
+        val ready = map ?: return@LaunchedEffect
+        if (selectionKey != lastSelectionKey && selected?.hasValidMapPosition() == true) {
+            ready.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(selected.latitude!!, selected.longitude!!), 13.0))
         }
+        lastSelectionKey = selectionKey
     }
     AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 }
 
-private fun fitMapNodes(map: MapLibreMap, nodes: List<MeshNode>) {
+private fun fitMapNodes(map: MapLibreMap, nodes: List<MeshNode>, padding: Int) {
     val coordinates = nodes.map { LatLng(it.latitude!!, it.longitude!!) }
     when (coordinates.size) {
         0 -> Unit
         1 -> map.animateCamera(CameraUpdateFactory.newLatLngZoom(coordinates.first(), 11.0))
         else -> {
             if (coordinates.distinct().size == 1) map.animateCamera(CameraUpdateFactory.newLatLngZoom(coordinates.first(), 11.0))
-            else map.animateCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(coordinates).build(), 80))
+            else map.animateCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(coordinates).build(), padding))
         }
     }
 }

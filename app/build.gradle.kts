@@ -11,10 +11,20 @@ android {
         applicationId = "io.dualmesh.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 6
-        versionName = "0.5.1"
+        versionCode = 7
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Documentation fixtures run in an isolated app sandbox and never ship in debug/release.
+    buildTypes {
+        create("screenshots") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".screenshots"
+            versionNameSuffix = "-screenshots"
+            matchingFallbacks += "debug"
+        }
     }
 
     buildFeatures {
@@ -33,6 +43,7 @@ android {
 }
 
 dependencies {
+    implementation("com.github.mik3y:usb-serial-for-android:3.11.0")
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
 
     implementation(composeBom)

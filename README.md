@@ -8,36 +8,49 @@ Meshtastic nodes.
 DualMesh keeps the two mesh protocols separate. It does not forward traffic from one mesh to the
 other mesh.
 
+## Android download
+
+[Download DualMesh 0.1.0](https://github.com/MickTheRus/dualmesh/releases/tag/v0.1.0)
+from this fork's releases. The installable APK requires Android 8.0 or newer and uses the same
+development signing certificate as the locally installed builds. Its SHA-256 checksum is included.
+
 ## Screenshots
 
-The screenshots contain test data. They do not contain data from a real deployment.
+The current phone and tablet screens use fictional data from an isolated screenshot build.
+No real messages, node identities, radio endpoints, or locations are included.
+[Full gallery and capture instructions](docs/SCREENSHOTS.md).
 
 <p>
-  <img src="docs/screenshots/tablet-dual-pane-redacted.png"
-       alt="DualMesh tablet with Meshtastic and MeshCore side by side" width="860">
+  <img src="docs/screenshots/tablet-channels.png" alt="Clean Channels tab with both meshes side by side" width="860">
 </p>
 <p>
-  <img src="docs/screenshots/phone-inbox-redacted.png" alt="DualMesh phone inbox" width="280">
-  <img src="docs/screenshots/phone-node-map-redacted.png" alt="DualMesh phone node map" width="280">
+  <img src="docs/screenshots/phone-focused.png" alt="Focused Channels tab with delivery receipts, RF/MQTT source, hops and reactions" width="260">
+  <img src="docs/screenshots/phone-nodes.png" alt="Nodes tab with favorites and MC/MT filters" width="260">
+  <img src="docs/screenshots/phone-map.png" alt="Map tab with fictional node locations" width="260">
 </p>
 <p>
-  <img src="docs/screenshots/android-auto-messages-redacted.png"
-       alt="DualMesh Android Auto messages" width="420">
-  <img src="docs/screenshots/android-auto-node-map-redacted.png"
-       alt="DualMesh Android Auto node map" width="420">
+  <img src="docs/screenshots/phone-reactions.png" alt="Native Meshtastic quick-reaction picker" width="260">
+  <img src="docs/screenshots/phone-settings.png" alt="Settings tab with radio configuration, layout preferences and packet logs" width="260">
+  <img src="docs/screenshots/phone-connections.png" alt="Connections tab with Bluetooth, Wi-Fi and USB radio management" width="260">
+</p>
+<p>
+  <img src="docs/screenshots/android-auto-messages-redacted.png" alt="DualMesh Android Auto messages" width="420">
+  <img src="docs/screenshots/android-auto-node-map-redacted.png" alt="DualMesh Android Auto node map" width="420">
 </p>
 
 ## Quick start
 
 1. Install the debug APK.
 2. Give the app access to Nearby devices and notifications.
-3. Select **Manage** in the applicable network pane.
-4. Add a BLE radio.
-5. For Meshtastic TCP, enter a host name or `host:port`.
-6. If you do not enter a port, the app uses port `4403`.
-7. Select a radio.
-8. Select one of its channels or direct-message conversations.
-9. Select **Nodes** or **Nodes / Map** to open the compact node list, then **Map** for positions.
+3. Open the **Connections** tab.
+4. Filter by Bluetooth, Wi-Fi/TCP, or USB/serial and enable the radio or radios you want.
+5. For Wi-Fi/TCP, add a host name or `host:port` with the matching mesh protocol.
+6. Default ports are `5000` for MeshCore and `4403` for Meshtastic.
+7. Choose **Use for messages** for the outbound radio on each mesh.
+8. In **Channels**, tap the chat heading to select a channel or direct-message conversation.
+9. Use the bottom tabs: **Channels**, **Nodes**, **Map**, **Settings**, and **Connections**.
+   Channels retains the two-mesh inbox; Nodes opens the directory and Map shows positions.
+   Settings lets you choose a connected radio to configure.
 10. Search by node name, ID, role, hardware, channel, or radio name. Use MC/MT chips and
     **Filters** to select networks, radios, node roles, and last-heard limits.
 11. Star nodes to save favorites; use **★ Favorites** to filter them. Open a node for grouped
@@ -45,19 +58,22 @@ The screenshots contain test data. They do not contain data from a real deployme
 12. For MeshCore contacts, use **Route > Set route** to edit direct, flood, or manual paths and
     discover a route to review before saving.
 
-Enable **Packets** only when you must record protocol traffic.
+Long-press a Meshtastic message or tap **React** to add an emoji. Tap an existing reaction to
+add the same emoji; long-press its chip to see who reacted and your delivery status.
+
+Enable packet recording under **Settings > Packet logs** only when you must record protocol traffic.
 
 WARNING: A packet log can contain keys, messages, node IDs, and locations.
 
 ### Meshtastic MQTT client proxy
 
 DualMesh can use the phone's Internet connection as the MQTT gateway for each connected
-Meshtastic radio, over BLE or TCP. Open that radio's **Settings > Module · MQTT** (or use the
+Meshtastic radio, over Bluetooth, Wi-Fi/TCP, or USB serial. Open that radio's **Settings > Module · MQTT** (or use the
 Meshtastic app or CLI): enable **MQTT** and **Proxy to client enabled**, then set the broker, credentials,
 TLS, and root topic. Enable channel **Uplink** and/or **Downlink** as needed.
 
 Reconnect the radio in DualMesh after changing settings in another app. DualMesh reads these
-settings from the radio and starts the proxy automatically. Open **Manage** to see each radio's
+settings from the radio and starts the proxy automatically. Open **Connections** to see each radio's
 MQTT proxy status. Stop the radio connection, or disable its MQTT client proxy setting and
 reconnect, to stop relaying.
 
@@ -67,6 +83,15 @@ Broker credentials stay in memory for the connection. The radio controls encrypt
 downlink, and map reporting; these can be edited under the radio's **Settings**.
 The proxy does not queue traffic while the broker is offline, and it drops oversized packets
 or excess downlink traffic when the radio transport is busy.
+
+### Radio management
+
+Open **Connections**. Filter by Bluetooth, Wi-Fi/TCP, USB/serial,
+and mesh protocol. Enable multiple radios to receive independently; choose **Use for messages**
+for the outbound radio on each mesh. Each row shows connection errors and automatic-retry status.
+Add Wi-Fi endpoints manually or select an attached USB serial device and approve access.
+See [radio connections](docs/RADIO_CONNECTIONS.md) for compatibility and permissions.
+Packet logs are available under **Settings > Packet logs**.
 
 ### Node statistics and announcements
 
@@ -82,7 +107,7 @@ support and response behavior.
 
 ### Radio settings
 
-Select a connected radio, then tap **Settings** beside its radio selector. DualMesh reads
+Open the **Settings** tab and select a connected radio. DualMesh reads
 settings once per connection and reuses them when you return. Tap **Refresh** for a full reread.
 Open a section, edit its fields, and select **Save**.
 Each save reads the current values first, changes only the edited fields, and reads the result
@@ -106,14 +131,16 @@ Refresh reads configuration without changing it.
 
 - Connect a maximum of four radios for each mesh technology.
 - Keep each radio, channel, contact, message, and map in its own data scope.
-- Connect to MeshCore with BLE.
-- Connect to Meshtastic with BLE or TCP.
+- Connect to MeshCore with Bluetooth, Wi-Fi/TCP, or USB serial.
+- Connect to Meshtastic with Bluetooth, Wi-Fi/TCP, or USB serial.
+- Manage multiple radios with transport/network filters, per-radio retry status and outbound selection.
 - Read and edit settings on either connected radio, with acknowledged writes and readback.
 - Proxy Meshtastic MQTT through the phone using each radio's MQTT configuration.
 - Find the channels that each radio supplies.
 - Send and receive channel messages.
 - Send and receive direct messages.
-- Show Meshtastic reactions below the related message.
+- Send and receive native Meshtastic reactions using quick emoji, a larger picker, or the keyboard.
+- Show per-message delivery confirmations, RF/MQTT source, and reported receive hop counts.
 - Save the newest 5,000 messages in SQLite.
 - Save node details and the latest node positions for each radio.
 - Search the node directory for each selected radio.
@@ -134,8 +161,9 @@ Refresh reads configuration without changing it.
 - A radio can discard a queued packet before DualMesh receives it.
 - Meshtastic keeps its normal app queue in node RAM.
 - A node restart or deep sleep can remove queued Meshtastic packets.
-- A sent state only means that the app gave the message to the radio.
-- The app does not show a final mesh delivery receipt.
+- Sent is separate from confirmed delivery; channel ACKs confirm the mesh, not every recipient.
+- Delivery confirms a radio acknowledgement, not that a person read the message.
+- MeshCore channel broadcasts do not support delivery acknowledgements.
 - Android or the device vendor can stop background start operations.
 - Open DualMesh if Android does not restore the service after device start.
 - The app saves a maximum of 12 known targets for each mesh technology.
@@ -204,6 +232,8 @@ debug signing. It is not a production release.
 - [Visual design](docs/DESIGN.md)
 - [Protocol design](docs/PROTOCOLS.md)
 - [Nodes, contacts, and maps](docs/NODES_AND_MAPS.md)
+- [Message delivery](docs/MESSAGE_DELIVERY.md)
+- [Radio connections](docs/RADIO_CONNECTIONS.md)
 - [Radio settings](docs/RADIO_SETTINGS.md)
 - [Packet logs](docs/PACKET_LOGGING.md)
 - [Privacy and security](docs/PRIVACY_AND_SECURITY.md)

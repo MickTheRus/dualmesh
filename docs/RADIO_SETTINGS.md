@@ -1,8 +1,10 @@
 # Radio settings
 
-Open **Settings** beside the selected radio. The editor is scoped to that radio's backend,
+Open the **Settings** tab and select a connected radio. The editor is scoped to that radio's backend,
 transport, and connection. Reading or editing another radio does not change the outbound
 message target. This is local companion configuration, not mesh remote administration.
+
+The Settings tab also contains **Phone layout** (Focused/Stacked) and **Packet logs**.
 
 ## Navigation and layout
 

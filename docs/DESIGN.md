@@ -20,10 +20,12 @@ This surface makes long text easy to read.
 
 ## Layout
 
-- The app mark, title, and top buttons make the navigation area.
-- Large round borders identify connection controls and network selectors.
-- A radio selector has a full border and a down arrow.
-- The **Nodes / Map** control has a separate blue border.
+- Persistent bottom tabs and each destination's heading provide navigation; there is no extra
+  global logo/header above the content.
+- Channels has one read-only radio/status line; connection actions are in Connections.
+- The entire chat heading opens the channel/contact selector using a small chevron.
+- Nodes, Map, Settings, and Connections each have their own destination.
+- Settings contains layout preferences and packet logs; there is no separate View menu.
 - Sent messages use a blue and violet gradient.
 - Received messages use a dark blue surface.
 - Reactions use small chips below the related message.
@@ -32,7 +34,8 @@ This surface makes long text easy to read.
 Phones have **Focused** and **Stacked** layouts. A display width of 720 dp or more uses the
 two-pane tablet layout.
 
-The node directory opens in a full-height panel. The map uses small blue markers. The directory
+The node directory has its own tab, with full-height node details. The map uses markers colored
+by mesh technology. The directory
 shows node identity, signal data, route data, and position data.
 
 ## Android Auto
@@ -56,3 +59,8 @@ DualMesh does not support Apple CarPlay.
 - [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines)
 - [Apple material guidance](https://developer.apple.com/design/human-interface-guidelines/materials)
 - [Apple color guidance](https://developer.apple.com/design/human-interface-guidelines/color)
+
+## Current screenshots
+
+See the [gallery](SCREENSHOTS.md) for current phone/tablet layouts and reproducible, fictional-data
+capture instructions. The screenshot build is isolated from the installed app and real radios.
