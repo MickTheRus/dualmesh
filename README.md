@@ -11,13 +11,11 @@ other mesh.
 ## Android download
 
 [Download DualMesh 0.2.0](https://github.com/logans-stuff/dualmesh/releases/tag/v0.2.0)
-from the upstream project's releases. The installable APK requires Android 8.0 or newer and uses a dedicated
-production signing certificate. Its SHA-256 checksum and public certificate are included.
-
-The production certificate differs from 0.1.0 and debug builds. Switching to 0.2.0 requires
-uninstalling those builds, which deletes their local messages and preferences. Save anything you
-need before switching. Future production releases will reuse the production key for normal updates.
-See [production release instructions](docs/PRODUCTION_RELEASES.md).
+from the upstream project's releases. Choose `dualmesh-0.2.0-debug.apk` for an installable build
+(Android 8.0+). The release-variant APK is also included as `dualmesh-0.2.0-release-unsigned.apk`
+for distributors to sign. Filenames and release notes identify each variant; checksums are included.
+No private production key is needed to produce these builds.
+See [versioned build and optional signing instructions](docs/PRODUCTION_RELEASES.md).
 
 ## Screenshots
 
@@ -218,7 +216,7 @@ its TCP Stream API.
 ### GitHub Actions
 
 The `Android APKs` workflow runs for changes to `main`, pull requests to `main`, and manual runs.
-It runs the unit tests and Android lint. It builds these artifacts:
+It runs the unit tests and debug/release Android lint. It builds these artifacts:
 
 - an installable debug APK
 - an unsigned release APK
@@ -230,7 +228,12 @@ section. GitHub keeps each artifact for 30 days.
 A successful `main` build also updates the
 [Development build](https://github.com/logans-stuff/dualmesh/releases/tag/development) prerelease.
 This prerelease contains the installable debug APK and its SHA-256 checksum. The APK uses Android
-debug signing. It is not a production release.
+debug signing.
+
+On upstream `main`, a successful build also publishes both APK variants, checksums, and build
+information under `v<versionName>` (for example, `v0.2.0`). This uses the same tested build outputs
+and the workflow's built-in GitHub token; production signing secrets are not required. Published
+versions remain unchanged. Bump `versionName` and `versionCode` for the next release.
 
 ## Documents
 
