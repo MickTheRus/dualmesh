@@ -18,6 +18,8 @@ import io.dualmesh.app.model.TraceRouteResult
 import io.dualmesh.app.model.TraceRouteState
 import io.dualmesh.app.model.UnifiedMessage
 import io.dualmesh.app.protocol.MeshCoreProtocol
+import io.dualmesh.app.settings.MeshCoreSettingsController
+import io.dualmesh.app.settings.SettingsScheduler
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -66,6 +68,60 @@ class MeshCoreBackend(
 
     private val session = GattSession(context, BleRadioScanner.MESHCORE_SERVICE, this)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val settingsController: MeshCoreSettingsController = MeshCoreSettingsController(
+        send = { frame ->
+            if (_connectionState.value != ConnectionState.CONNECTED) false else {
+                writeFrame(frame, "Radio settings command ${frame[0].toInt() and 255}")
+                true
+            }
+        },
+        ready = {
+            _connectionState.value == ConnectionState.CONNECTED && !waitingForDeviceInfo &&
+                channelScanIndex == null && !waitingForContacts && !waitingForSetTime && pendingTraces.isEmpty() && !nodeActionsController.busy
+        },
+        channelCapacity = { _channelCapacity.value },
+        scheduler = SettingsScheduler { delay, action ->
+            val callback = Runnable(action)
+            mainHandler.postDelayed(callback, delay)
+            ({ mainHandler.removeCallbacks(callback) })
+        },
+        onReadback = { frame ->
+            if (frame[0].toInt() == RESPONSE_SELF_INFO) selfName = parseSelfName(frame)
+            MeshCoreProtocol.parseChannelInfo(frame)?.let { info ->
+                _channels.value = (_channels.value.filterNot { it.index == info.index } +
+                    if (info.configured) listOf(RadioChannel(info.index, info.name)) else emptyList())
+                    .sortedBy(RadioChannel::index)
+            }
+        },
+    )
+    private val nodeActionsController: io.dualmesh.app.nodes.MeshCoreNodeActions = io.dualmesh.app.nodes.MeshCoreNodeActions(
+        send = { frame ->
+            if (_connectionState.value != ConnectionState.CONNECTED) false else {
+                writeFrame(frame, "Node action command ${frame[0].toInt() and 255}")
+                true
+            }
+        },
+        ready = {
+            _connectionState.value == ConnectionState.CONNECTED && !waitingForDeviceInfo &&
+                channelScanIndex == null && !waitingForContacts && !waitingForSetTime &&
+                pendingTraces.isEmpty() && !settingsController.busy
+        },
+        scheduler = SettingsScheduler { delay, action ->
+            val callback = Runnable(action)
+            mainHandler.postDelayed(callback, delay)
+            ({ mainHandler.removeCallbacks(callback) })
+        },
+        onContact = ::updateContact,
+        onIdle = { mainHandler.post {
+            if (pendingContactSync && _connectionState.value == ConnectionState.CONNECTED && !nodeActionsController.busy) {
+                pendingContactSync = false
+                beginContactSync()
+            }
+        } },
+    )
+    override val contactRoutes: io.dualmesh.app.nodes.ContactRoutes get() = nodeActionsController
+    override val nodeActions: io.dualmesh.app.nodes.NodeActions get() = nodeActionsController
+    override val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess get() = settingsController
     private val handshakeTimeout = Runnable {
         if (_connectionState.value == ConnectionState.CONNECTING) {
             session.disconnect()
@@ -90,6 +146,7 @@ class MeshCoreBackend(
     private var channelSlotCount = MeshCoreProtocol.MAX_CHANNELS
     private var waitingForSetTime = false
     private var waitingForContacts = false
+    private var pendingContactSync = false
     private val contactDetails = mutableMapOf<String, MeshCoreProtocol.ContactInfo>()
     private val pendingTraces = mutableMapOf<UInt, PendingTrace>()
 
@@ -99,6 +156,9 @@ class MeshCoreBackend(
     )
 
     override fun connect(address: String, name: String) {
+        pendingContactSync = false
+        nodeActionsController.reset()
+        settingsController.reset()
         clearStartupCallbacks()
         failPendingTraces("A new MeshCore connection started.")
         waitingForDeviceInfo = false
@@ -117,6 +177,9 @@ class MeshCoreBackend(
     }
 
     override fun disconnect() {
+        pendingContactSync = false
+        nodeActionsController.reset()
+        settingsController.reset()
         clearHandshakeTimeout()
         clearStartupCallbacks()
         failPendingTraces("The MeshCore radio disconnected.")
@@ -132,6 +195,7 @@ class MeshCoreBackend(
     }
 
     override fun sendChannelMessage(text: String, channel: Int): Result<Unit> {
+        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -167,6 +231,7 @@ class MeshCoreBackend(
     }
 
     override fun sendDirectMessage(text: String, contactId: String): Result<Unit> {
+        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -203,6 +268,7 @@ class MeshCoreBackend(
     }
 
     override fun traceRoute(contactId: String): Result<Unit> {
+        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -266,6 +332,10 @@ class MeshCoreBackend(
     }
 
     override fun onDisconnected() {
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onDisconnected() }; return }
+        pendingContactSync = false
+        nodeActionsController.reset()
+        settingsController.reset()
         clearHandshakeTimeout()
         clearStartupCallbacks()
         failPendingTraces("The MeshCore radio disconnected.")
@@ -273,6 +343,10 @@ class MeshCoreBackend(
     }
 
     override fun onError(message: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onError(message) }; return }
+        pendingContactSync = false
+        nodeActionsController.reset()
+        settingsController.reset()
         clearHandshakeTimeout()
         clearStartupCallbacks()
         failPendingTraces(message)
@@ -281,6 +355,7 @@ class MeshCoreBackend(
 
     override fun onNotification(characteristic: UUID, value: ByteArray) {
         if (characteristic != TX_CHARACTERISTIC || value.isEmpty()) return
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onNotification(characteristic, value) }; return }
         packetLogger.log(
             network = network,
             direction = PacketDirection.RX,
@@ -288,6 +363,10 @@ class MeshCoreBackend(
             payload = value,
             summary = describeIncomingFrame(value),
         )
+        nodeActionsController.observeDeviceInfo(value)
+        if (nodeActionsController.receive(value)) return
+        if (settingsController.receive(value)) return
+        settingsController.observe(value)
         if ((value[0].toInt() and 0xff) == RESPONSE_SELF_INFO) {
             selfName = parseSelfName(value)
             clearHandshakeTimeout()
@@ -314,30 +393,7 @@ class MeshCoreBackend(
             }
             advanceChannelScan(info.index + 1)
         }
-        MeshCoreProtocol.parseContact(value)?.let { contact ->
-            contactDetails[contact.publicKey] = contact
-            mainHandler.removeCallbacks(contactQueryTimeout)
-            val updated = _contacts.value.filterNot { it.id == contact.publicKey } +
-                RadioContact(contact.publicKey, contact.name)
-            _contacts.value = updated.sortedBy { it.name.lowercase() }
-            val node = MeshNode(
-                network = network,
-                id = contact.publicKey,
-                name = contact.name,
-                publicKey = contact.publicKey,
-                role = meshCoreAdvertType(contact.type),
-                messageable = true,
-                flags = contact.flags,
-                lastHeardMillis = contact.lastAdvertMillis,
-                latitude = contact.latitude,
-                longitude = contact.longitude,
-                positionTimeMillis = contact.lastAdvertMillis.takeIf { it > 0 },
-                source = "MeshCore advert",
-            )
-            _nodes.value = (_nodes.value.filterNot { it.id == node.id } + node)
-                .sortedBy { it.name.lowercase() }
-            mainHandler.postDelayed(contactQueryTimeout, CONTACT_SYNC_TIMEOUT_MS)
-        }
+        updateContact(value)
         when (value[0].toInt() and 0xff) {
             MeshCoreProtocol.RESPONSE_CONTACTS_START -> {
                 waitingForContacts = true
@@ -386,13 +442,41 @@ class MeshCoreBackend(
             PUSH_CONTACT_UPDATED,
             PUSH_PATH_UPDATED,
             PUSH_NEW_ADVERT,
-            -> beginContactSync()
+            -> if (nodeActionsController.busy) pendingContactSync = true else beginContactSync()
             MeshCoreProtocol.PUSH_MESSAGE_WAITING,
             MeshCoreProtocol.RESPONSE_CONTACT_MESSAGE,
             MeshCoreProtocol.RESPONSE_CHANNEL_MESSAGE,
             MeshCoreProtocol.RESPONSE_CONTACT_MESSAGE_V3,
             MeshCoreProtocol.RESPONSE_CHANNEL_MESSAGE_V3,
             -> writeFrame(MeshCoreProtocol.syncNextMessage(), "CMD_SYNC_NEXT_MESSAGE")
+        }
+    }
+
+    private fun updateContact(frame: ByteArray) {
+        nodeActionsController.observeContact(frame)
+        MeshCoreProtocol.parseContact(frame)?.let { contact ->
+            contactDetails[contact.publicKey] = contact
+            if (waitingForContacts) mainHandler.removeCallbacks(contactQueryTimeout)
+            val updated = _contacts.value.filterNot { it.id == contact.publicKey } +
+                RadioContact(contact.publicKey, contact.name)
+            _contacts.value = updated.sortedBy { it.name.lowercase() }
+            val node = MeshNode(
+                network = network,
+                id = contact.publicKey,
+                name = contact.name,
+                publicKey = contact.publicKey,
+                role = meshCoreAdvertType(contact.type),
+                messageable = true,
+                flags = contact.flags,
+                lastHeardMillis = contact.lastAdvertMillis,
+                latitude = contact.latitude,
+                longitude = contact.longitude,
+                positionTimeMillis = contact.lastAdvertMillis.takeIf { it > 0 },
+                source = "MeshCore advert",
+            )
+            _nodes.value = (_nodes.value.filterNot { it.id == node.id } + node)
+                .sortedBy { it.name.lowercase() }
+            if (waitingForContacts) mainHandler.postDelayed(contactQueryTimeout, CONTACT_SYNC_TIMEOUT_MS)
         }
     }
 

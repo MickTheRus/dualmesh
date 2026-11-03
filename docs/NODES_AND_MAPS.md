@@ -1,7 +1,114 @@
 # Nodes, contacts, and maps
 
+## Node list and shared map
+
+Open **Nodes** in the app header or **Nodes / Map** in a network pane. The compact list includes
+saved nodes from both technologies and all radios. Each row shows its short-name badge, name,
+source radio, role, last heard, and available hop/SNR data. **Sort** orders by last heard, name,
+hops, or signal; unknown hop/signal values sort last. Tap a row for node details and trace history.
+Back returns to the list with its scroll position preserved. Select **Map** to show positions. **Both**, **MC**, and **MT** select which networks appear.
+MC markers are purple; MT markers are green. Tap a marker for its details and traceroute action.
+**Fit nodes** frames the current results; incoming updates preserve the camera you chose.
+**Nodes** returns to the same filtered list, including nodes without valid positions. **Show on
+map** centers a positioned node. Traces always use that node's network and source radio.
+
+**Filters** contains Include unknown, Exclude MQTT, Only show direct nodes, Hide offline nodes,
+Hide unheard nodes, Exclude infrastructure, last-heard windows, individual roles, and radio
+selection. It also controls node labels and dark street tiles. Filters persist across app
+restarts and apply to both the directory and markers. Search uses the same filters.
+
+An unknown MT node has no short name; an unknown MC node has no advertised name. Direct requires
+a measured zero-hop route over RF; missing hop data is not treated as direct. MeshCore adverts
+currently do not supply measured hop counts, so Only show direct nodes hides those records.
+Offline means no last-heard update within two hours. Nodes without a recorded last-heard time
+are hidden by both offline and explicit last-heard limits. Infrastructure includes routers,
+repeaters, and room servers. Invalid coordinates and the (0, 0) placeholder stay off the map,
+but their nodes remain searchable in the directory.
+
 DualMesh keeps a separate node directory for each radio. This separation is necessary when radios
 use different frequencies, presets, regions, or channels.
+
+## Favorites and node details
+
+Tap the star on a node row or detail screen to add/remove a favorite. Favorites appear first
+within the chosen sort order. **★ Favorites** limits both list and map results to favorites,
+while retaining network, radio, search and other filters. Favorites and the filter survive app
+restarts. They are private app preferences keyed by network, source radio and node ID; they do
+not change Meshtastic firmware favorites or MeshCore contact flags. Equal node IDs on two radios
+can be favorited independently.
+
+Node details use sections for **Last heard**, **Location**, **Source**, **Node info**, and
+**Traceroute**. Available timestamps, coordinates/precision, source radio, MQTT state, channel,
+role, hardware, public key, signal and trace history are shown. Missing fields remain unknown.
+IDs and values can be selected and copied. Opening details from the map returns to that map;
+opening from the list returns to the list with its position retained.
+
+## MeshCore contact routes
+
+Open a MeshCore node, then **Route > Set route** on its connected source radio. The editor reads
+only that contact when a cached route is unavailable; **Refresh** explicitly rereads it. It offers:
+
+- **Direct:** zero intermediate repeaters.
+- **Flood:** forget the stored path using `CMD_RESET_PATH`. A subsequent exchange can learn a new path.
+- **Manual:** paste ordered hex hop hashes, add known repeaters/rooms from the same radio, and
+  reorder/remove hops. Hops run from the companion toward the destination and exclude the
+  destination itself. Hash-prefix collisions are displayed rather than attributed to one node.
+- **Discover route:** send a path-discovery request, then review **Discovered route**. **Use
+  discovered route** stages it in the editor; **Save route** applies it.
+- **Recent routes:** stage one of the last ten distinct routes observed for this contact during
+  the current connection. This history is in memory and clears on reconnect.
+
+A save reads the current contact by full key, patches only its path, waits for the generic radio
+ACK, and reads the contact again to verify the exact route. Names, flags, advert timestamps,
+location, modification timestamp and unknown trailing fields are preserved. Readback updates
+both the displayed route and the backend contact used for sends and traceroutes. Rejection,
+timeout or a different readback is shown as unverified; refresh before retrying. Route operations
+share the companion's serial command queue with stats and adverts, and defer contact-sync pushes
+until the operation finishes. They do not change another radio or remote repeater settings.
+
+Path length is bounded by 63 hops and the radio's 64-byte path buffer. Two-/three-byte hash
+controls appear only when the companion reports the corresponding device-info capability.
+Three-byte routes can be saved, but the trace format cannot represent three-byte hashes, so
+traceroute reports that limitation instead of truncating them.
+
+These are stored radio routes, not an app-side lock: firmware may replace them when learning a
+new path. DualMesh does not implement MeshCore-open's weighted automatic route rotation/retries.
+Discovery uses RF and may time out or be unsupported by firmware. It does not save automatically;
+simply opening the editor or changing a draft sends no route writes or discovery requests.
+
+## Statistics and advertisements
+
+Open **Radio actions** and choose the connected source radio. **Request stats** performs an
+explicit read; opening the screen does not issue requests or transmit advertisements. Results
+stay in memory for the connection and show the target and read time. Closing the dialog does
+not cancel an outstanding request. Reconnecting clears the result.
+
+- **MeshCore:** reads core (battery, uptime, errors, queue), radio (noise, RSSI/SNR, airtime), and
+  packet counters. Requires companion protocol 8 or newer; unsupported reads and timeouts are
+  reported. These are local companion statistics, not remote repeater administration.
+- **Meshtastic:** requests device telemetry and local statistics from the companion radio.
+  On a Meshtastic node's detail screen, **Request node stats** requests that node's device
+  telemetry using its source radio and channel. Remote requests use RF and may time out when
+  a node is unavailable or firmware restricts telemetry. Responses must match the source and
+  request ID; routing failures are reported. Missing optional metrics are omitted. Some firmware
+  returns device telemetry but does not answer local-statistics queries; available device metrics
+  remain visible with an explanation of the missing response.
+
+**Zero-hop** and **Flood** advertise the selected radio. MeshCore uses `CMD_SEND_SELF_ADVERT`
+with the zero-hop/flood flag and waits for the firmware acknowledgement. The radio retains its
+configured location policy and flood scope. Meshtastic broadcasts the radio's own `NODEINFO_APP`
+user record on the selected channel, with hop limit zero or the configured LoRa hop limit.
+It requests neither acknowledgements nor responses, preserving zero-hop behavior. The UI
+reports that the packet was queued; reception by other nodes is not guaranteed. Meshtastic
+node-info broadcasts are an equivalent announcement, not the MeshCore advert format.
+
+Settings and node actions are serialized on each radio. On MeshCore, message and trace sends
+also wait while a node action is active because generic replies have no request IDs. No stats
+are posted into chat and there are no automatic or repeating advertisements.
+
+Protocol references: [MeshCore companion firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp),
+[Meshtastic telemetry](https://github.com/meshtastic/firmware/blob/master/src/modules/Telemetry/DeviceTelemetry.cpp),
+and [Meshtastic zero-hop routing](https://github.com/meshtastic/firmware/blob/master/src/mesh/Router.cpp).
 
 ## Node identity
 
@@ -82,12 +189,12 @@ Select **Nodes / Map** in a network pane.
 
 The panel shows:
 
-- the selected radio name
+- the source radio name for each node
 - the total node count
 - the count of nodes with positions
 - a MapLibre and OpenStreetMap map
 - one marker for each positioned node
-- a search field for the selected radio
+- a search field across the enabled networks and radios
 - node identity and radio data
 - a **Trace** control for each available remote node.
 
@@ -95,17 +202,16 @@ Search by node name, short name, ID, public key, role, hardware, hop count, or s
 `channel 2` or `ch 2` to find nodes on a channel. The result count changes as you type. The
 **Trace** control stays next to each result.
 
-Phones can use the Focused or Stacked layout. Tablets show both network panes. The map always uses
-the radio that is selected in its network pane.
+Phones can use the Focused or Stacked layout. Tablets show both network panes. The shared map
+uses its own network and radio filters independently of the radio selected for sending messages.
 
 Map tiles require an Internet connection. The saved node rows and coordinates work offline. The
 app does not include offline map files.
 
 ## Traceroute
 
-Traceroute uses the radio selected in the applicable network pane. It does not use another
-connected radio, even when that radio can see the same node. Select **Nodes / Map**, then select
-**Trace** on a node.
+Traceroute uses the source radio shown on the node row. It does not use another
+connected radio, even when that radio can see the same node. Select **Nodes**, open a node, then select **Trace**.
 
 The node row shows the request state, the route toward the destination, the return route when the
 protocol supplies one, and the SNR for each available link. A request times out after 60 seconds.

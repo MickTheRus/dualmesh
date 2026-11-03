@@ -18,7 +18,11 @@ import io.dualmesh.app.model.TraceRouteResult
 import io.dualmesh.app.model.TraceRouteState
 import io.dualmesh.app.model.UnifiedMessage
 import io.dualmesh.app.protocol.textMetadata
+import io.dualmesh.app.protocol.MeshtasticMqttSettings
+import io.dualmesh.app.transport.MeshtasticMqttProxy
 import io.dualmesh.app.transport.MeshtasticTcpSession
+import io.dualmesh.app.settings.MeshtasticSettingsController
+import io.dualmesh.app.settings.SettingsScheduler
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -29,6 +33,8 @@ import okio.ByteString.Companion.toByteString
 import org.meshtastic.proto.Data
 import org.meshtastic.proto.Constants
 import org.meshtastic.proto.Channel
+import org.meshtastic.proto.Config
+import org.meshtastic.proto.ModuleConfig
 import org.meshtastic.proto.FromRadio
 import org.meshtastic.proto.MeshPacket
 import org.meshtastic.proto.PortNum
@@ -82,8 +88,43 @@ class MeshtasticBackend(
     private val session = GattSession(context, BleRadioScanner.MESHTASTIC_SERVICE, this)
     private val tcpSession = MeshtasticTcpSession(this)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val settingsController: MeshtasticSettingsController = MeshtasticSettingsController(
+        send = { sendTransport(it) },
+        readyNode = { myNodeNum.takeIf { configReady && _connectionState.value == ConnectionState.CONNECTED && !nodeActionsController.busy } },
+        scheduler = SettingsScheduler { delay, action ->
+            val callback = Runnable(action)
+            mainHandler.postDelayed(callback, delay)
+            ({ mainHandler.removeCallbacks(callback) })
+        },
+        onReadback = ::handleFromRadio,
+    )
+    override val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess get() = settingsController
+    private val ownUsers = mutableMapOf<Int, User>()
+    private val nodeActionsController: io.dualmesh.app.nodes.MeshtasticNodeActions = io.dualmesh.app.nodes.MeshtasticNodeActions(
+        send = { sendTransport(it) },
+        readyNode = { myNodeNum.takeIf { configReady && _connectionState.value == ConnectionState.CONNECTED && !settingsController.radioSettings.value.busy } },
+        localUser = { settingsController.ownerUser() ?: ownUsers[myNodeNum] },
+        channel = { destination -> _nodes.value.firstOrNull { it.id == destination.toUInt().toString() }?.channel ?: _selectedChannel.value },
+        hopLimit = { loraConfig?.hop_limit ?: 3 },
+        scheduler = SettingsScheduler { delay, action ->
+            val callback = Runnable(action)
+            mainHandler.postDelayed(callback, delay)
+            ({ mainHandler.removeCallbacks(callback) })
+        },
+    )
+    override val nodeActions: io.dualmesh.app.nodes.NodeActions get() = nodeActionsController
+    private val mqttProxy = MeshtasticMqttProxy(dispatchToRadio = { mainHandler.post(it) }) { message ->
+        if (configReady && _connectionState.value == ConnectionState.CONNECTED) {
+            sendTransport(ToRadio(mqttClientProxyMessage = message).encode(), mqttDownlink = true)
+        }
+    }
+    val mqttProxyStatus: StateFlow<String> = mqttProxy.status
+    private var mqttConfig: ModuleConfig.MQTTConfig? = null
+    private var loraConfig: Config.LoRaConfig? = null
+    private val mqttChannels = mutableMapOf<Int, Channel>()
     private val handshakeTimeout = Runnable {
         if (_connectionState.value == ConnectionState.CONNECTING) {
+            mqttProxy.stop()
             disconnectActiveTransport()
             _connectionState.value = ConnectionState.ERROR
         }
@@ -110,6 +151,13 @@ class MeshtasticBackend(
         }
 
     private fun prepareConnection(transport: Transport, name: String) {
+        nodeActionsController.reset()
+        ownUsers.clear()
+        settingsController.reset()
+        mqttProxy.stop()
+        mqttConfig = null
+        loraConfig = null
+        mqttChannels.clear()
         clearHandshakeTimeout()
         failPendingTraces("A new Meshtastic connection started.")
         myNodeNum = 0
@@ -126,6 +174,11 @@ class MeshtasticBackend(
     }
 
     override fun disconnect() {
+        nodeActionsController.reset()
+        ownUsers.clear()
+        settingsController.reset()
+        mqttProxy.stop()
+        configReady = false
         clearHandshakeTimeout()
         failPendingTraces("The Meshtastic radio disconnected.")
         activeTransport = Transport.NONE
@@ -314,6 +367,11 @@ class MeshtasticBackend(
 
     override fun onDisconnected() {
         if (activeTransport != Transport.BLE) return
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onDisconnected() }; return }
+        nodeActionsController.reset()
+        ownUsers.clear()
+        settingsController.reset()
+        mqttProxy.stop()
         clearHandshakeTimeout()
         failPendingTraces("The Meshtastic radio disconnected.")
         reading = false
@@ -323,6 +381,11 @@ class MeshtasticBackend(
 
     override fun onError(message: String) {
         if (activeTransport != Transport.BLE) return
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onError(message) }; return }
+        nodeActionsController.reset()
+        ownUsers.clear()
+        settingsController.reset()
+        mqttProxy.stop()
         clearHandshakeTimeout()
         failPendingTraces(message)
         reading = false
@@ -357,10 +420,22 @@ class MeshtasticBackend(
     }
 
     private fun handleFromRadio(fromRadio: FromRadio) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { handleFromRadio(fromRadio) }; return }
+        settingsController.observe(fromRadio)
+        fromRadio.moduleConfig?.mqtt?.let {
+            mqttConfig = it
+            updateMqttProxy()
+        }
+        fromRadio.config?.lora?.let {
+            loraConfig = it
+            updateMqttProxy()
+        }
         fromRadio.channel?.let(::updateChannel)
+        fromRadio.mqttClientProxyMessage?.let(mqttProxy::publish)
         fromRadio.node_info?.let { nodeInfo ->
             val nodeNum = nodeInfo.num
             val user = nodeInfo.user
+            if (user != null) ownUsers[nodeNum] = user
             updateNode(
                 MeshNode(
                     network = network,
@@ -420,6 +495,8 @@ class MeshtasticBackend(
             if (myNodeNum != 0) markConnected()
         }
         val packet = fromRadio.packet ?: return
+        if (nodeActionsController.receive(packet)) return
+        if (settingsController.receive(packet)) return
         val decoded = packet.decoded ?: return
         when (decoded.portnum) {
             PortNum.POSITION_APP -> {
@@ -485,9 +562,23 @@ class MeshtasticBackend(
     private fun markConnected() {
         clearHandshakeTimeout()
         _connectionState.value = ConnectionState.CONNECTED
+        updateMqttProxy()
+    }
+
+    private fun updateMqttProxy() {
+        if (!configReady || myNodeNum == 0 || _connectionState.value != ConnectionState.CONNECTED) return
+        val config = mqttConfig
+        if (config == null || !config.enabled || !config.proxy_to_client_enabled) {
+            mqttProxy.stop()
+            return
+        }
+        runCatching { MeshtasticMqttSettings.from(config, mqttChannels.values, loraConfig) }
+            .onSuccess { mqttProxy.configure(it, myNodeNum) }
+            .onFailure { mqttProxy.stop("MQTT proxy: check radio MQTT settings") }
     }
 
     private fun updateUser(packet: MeshPacket, user: User) {
+        ownUsers[packet.from] = user
         val nodeNum = packet.from
         updateNode(
             MeshNode(
@@ -653,6 +744,8 @@ class MeshtasticBackend(
                 ?.times(1000)
 
     private fun updateChannel(channel: Channel) {
+        mqttChannels[channel.index] = channel
+        updateMqttProxy()
         val withoutChannel = _channels.value.filterNot { it.index == channel.index }
         if (channel.role == Channel.Role.DISABLED) {
             _channels.value = withoutChannel
@@ -694,6 +787,11 @@ class MeshtasticBackend(
 
     override fun onTcpDisconnected() {
         if (activeTransport != Transport.TCP) return
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onTcpDisconnected() }; return }
+        nodeActionsController.reset()
+        ownUsers.clear()
+        settingsController.reset()
+        mqttProxy.stop()
         clearHandshakeTimeout()
         failPendingTraces("The Meshtastic TCP connection closed.")
         configReady = false
@@ -702,20 +800,27 @@ class MeshtasticBackend(
 
     override fun onTcpError(message: String) {
         if (activeTransport != Transport.TCP) return
+        if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onTcpError(message) }; return }
+        nodeActionsController.reset()
+        ownUsers.clear()
+        settingsController.reset()
+        mqttProxy.stop()
         clearHandshakeTimeout()
         failPendingTraces(message)
         configReady = false
         _connectionState.value = ConnectionState.ERROR
     }
 
-    private fun sendTransport(payload: ByteArray): Boolean {
+    private fun sendTransport(payload: ByteArray, mqttDownlink: Boolean = false): Boolean {
         val transport = activeTransport
         val sent = when (transport) {
             Transport.BLE -> {
-                session.write(TO_RADIO_CHARACTERISTIC, payload)
-                true
+                if (mqttDownlink) session.tryWrite(TO_RADIO_CHARACTERISTIC, payload) else {
+                    session.write(TO_RADIO_CHARACTERISTIC, payload)
+                    true
+                }
             }
-            Transport.TCP -> tcpSession.send(payload)
+            Transport.TCP -> tcpSession.send(payload, bounded = mqttDownlink)
             Transport.NONE -> false
         }
         if (sent) {
@@ -742,6 +847,7 @@ class MeshtasticBackend(
                     }
                     toRadio.want_config_id != null ->
                         "want_config id=${toRadio.want_config_id}"
+                    toRadio.mqttClientProxyMessage != null -> "MQTT proxy downlink"
                     else -> "ToRadio"
                 }
             }
@@ -778,6 +884,8 @@ class MeshtasticBackend(
         }
         fromRadio.my_info?.let { return "my_info ${nodeLabel(it.my_node_num)}" }
         fromRadio.config_complete_id?.let { return "config_complete id=$it" }
+        fromRadio.mqttClientProxyMessage?.let { return "MQTT proxy uplink" }
+        fromRadio.moduleConfig?.mqtt?.let { return "MQTT module config" }
         return "FromRadio"
     }
 

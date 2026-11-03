@@ -145,6 +145,27 @@ The decoder accepts split input and wake bytes. It finds the next header after i
 8. Set the backend state to connected.
 9. Continue to read `FromRadio.packet` data.
 
+### MQTT client proxy
+
+After configuration completes, each Meshtastic backend starts its own MQTT client when
+`moduleConfig.mqtt.enabled` and `proxy_to_client_enabled` are both true. It uses the radio's
+broker, credentials, TLS setting, and root topic. It subscribes to binary topics for enabled
+downlink channels, JSON topics when JSON is enabled, and the binary PKI topic. Blank channel
+names resolve from the radio's LoRa modem preset, using firmware topic names.
+
+`FromRadio.mqttClientProxyMessage` requests are published with QoS 1 and their retain flag.
+Binary downlinks are returned in `ToRadio.mqttClientProxyMessage.data_`; JSON downlinks use
+`text`. The firmware processes these envelopes and decides whether to transmit on RF. Own
+uplinks of other nodes' packets and packets claiming our node ID through another gateway are
+filtered; our own origin returning through our gateway is preserved for the firmware's
+implicit acknowledgement. Payloadless non-PKI downlinks are discarded unless from our gateway.
+
+MQTT uses clean sessions and bounded in-memory work. Oversized downlinks, including topic and
+protobuf overhead beyond the 512-byte radio API limit, are discarded. Downlinks queued before
+a stop, reconnect, or settings replacement cannot enter the new radio session. Broker loss
+retries with backoff and restores subscriptions; radio disconnection tears down the broker.
+Broker errors appear per radio in Manage and do not change the radio connection state.
+
 The app does not use value `69420`. Meshtastic reserves this value for
 `NODELESS_WANT_CONFIG_ID`.
 

@@ -36,6 +36,8 @@ internal fun filterNodes(nodes: List<MeshNode>, query: String): List<MeshNode> {
             node.channel?.let { "channel $it ch $it" },
             node.hopsAway?.let { "$it hops" },
             node.source,
+            node.network.label,
+            node.deviceName,
             "mqtt".takeIf { node.viaMqtt == true },
         ).joinToString(" ").lowercase(Locale.ROOT)
 

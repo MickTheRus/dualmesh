@@ -43,7 +43,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +59,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.dualmesh.app.MainViewModel
@@ -82,14 +80,6 @@ import io.dualmesh.app.model.UnifiedMessage
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
-import org.maplibre.android.annotations.MarkerOptions
-import org.maplibre.android.annotations.IconFactory
-import org.maplibre.android.camera.CameraUpdateFactory
-import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.geometry.LatLngBounds
-import org.maplibre.android.maps.MapLibreMap
-import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.Style
 
 private enum class PhoneLayoutMode(val label: String) {
     FOCUSED("Focused"),
@@ -141,8 +131,12 @@ fun DualMeshApp(
     }
     var showViewMenu by remember { mutableStateOf(false) }
     var showPacketLog by rememberSaveable { mutableStateOf(false) }
+    var showMap by rememberSaveable { mutableStateOf(false) }
 
     DualMeshTheme {
+        if (showMap) {
+            MeshMapDialog(manager = manager, onDismiss = { showMap = false })
+        }
         SpaceBackdrop {
         Scaffold(
             containerColor = Color.Transparent,
@@ -172,6 +166,7 @@ fun DualMeshApp(
                         }
                     },
                     actions = {
+                        HeaderAction("Nodes") { showMap = true }
                         Box {
                             HeaderAction("View") { showViewMenu = true }
                             DropdownMenu(
@@ -759,7 +754,6 @@ private fun NetworkPane(
     modifier: Modifier = Modifier,
 ) {
     val manager = viewModel.manager
-    val traceRouteResults by manager.traceRouteResults.collectAsStateWithLifecycle()
     val selectedDeviceConnection = deviceConnections.firstOrNull {
         MultiDeviceBackend.targetId(it.profile) == selectedDeviceId
     }
@@ -776,6 +770,7 @@ private fun NetworkPane(
         .values
         .sortedBy { it.name.lowercase() }
     var showNodes by rememberSaveable(network, selectedDeviceId) { mutableStateOf(false) }
+    var showRadioSettings by rememberSaveable(network, selectedDeviceId) { mutableStateOf(false) }
     val conversationId = selectedConversationIds[network] ?: "channel:$selectedChannel"
     val conversationName = manager.conversationName(network, conversationId)
     val conversationMessages = messages.filter {
@@ -844,9 +839,13 @@ private fun NetworkPane(
                     onSelect = viewModel::selectDevice,
                     modifier = Modifier.weight(1f),
                 )
+                TextButton(
+                    enabled = selectedDeviceState == ConnectionState.CONNECTED,
+                    onClick = { showRadioSettings = true },
+                ) { Text("Settings") }
                 NodeMapButton(
-                    nodeCount = radioNodes.size,
-                    positionedCount = radioNodes.count(MeshNode::hasPosition),
+                    nodeCount = nodes.size,
+                    positionedCount = nodes.count { it.hasValidMapPosition() },
                     onClick = { showNodes = true },
                 )
             }
@@ -873,19 +872,21 @@ private fun NetworkPane(
         )
     }
     if (showNodes) {
-        NodeMapDialog(
-            network = network,
-            radioName = selectedDeviceConnection?.profile?.name ?: network.label,
-            nodes = radioNodes,
-            connected = selectedDeviceState == ConnectionState.CONNECTED,
-            traceResults = traceRouteResults.filter {
-                it.network == network && it.deviceId == selectedDeviceId
-            },
-            onTrace = { node ->
-                manager.traceRoute(network, node.deviceId, node.id)
-            },
-            onDismiss = { showNodes = false },
-        )
+        MeshMapDialog(manager = manager, onDismiss = { showNodes = false })
+    }
+    if (showRadioSettings && selectedDeviceId != null) {
+        val access = when (network) {
+            MeshNetwork.MESHCORE -> manager.meshCore.settingsFor(selectedDeviceId)
+            MeshNetwork.MESHTASTIC -> manager.meshtastic.settingsFor(selectedDeviceId)
+        }
+        if (access != null) {
+            RadioSettingsDialog(
+                access = access,
+                radioName = selectedDeviceConnection?.profile?.name ?: network.label,
+                connected = selectedDeviceState == ConnectionState.CONNECTED,
+                onDismiss = { showRadioSettings = false },
+            )
+        }
     }
 }
 
@@ -1069,6 +1070,13 @@ private fun RecentConnections(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                connection?.mqttProxyStatus?.let { status ->
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (connection == null) {
                 TextButton(onClick = { onConnect(profile) }) {
@@ -1188,237 +1196,7 @@ private fun NodeMapButton(
 }
 
 @Composable
-private fun NodeMapDialog(
-    network: MeshNetwork,
-    radioName: String,
-    nodes: List<MeshNode>,
-    connected: Boolean,
-    traceResults: List<TraceRouteResult>,
-    onTrace: (MeshNode) -> Result<Unit>,
-    onDismiss: () -> Unit,
-) {
-    var traceError by remember { mutableStateOf<String?>(null) }
-    val searchKey = nodes.firstOrNull()?.deviceId ?: "$network:$radioName"
-    var nodeQuery by rememberSaveable(searchKey) { mutableStateOf("") }
-    val filteredNodes = remember(nodes, nodeQuery) { filterNodes(nodes, nodeQuery) }
-    val positioned = nodes.filter { node ->
-        node.latitude?.let { it in -90.0..90.0 } == true &&
-            node.longitude?.let { it in -180.0..180.0 } == true
-    }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(10.dp),
-            colors = CardDefaults.cardColors(containerColor = GlassSurfaceStrong),
-            shape = RoundedCornerShape(26.dp),
-            border = BorderStroke(1.dp, GlassOutline),
-        ) {
-            Column(Modifier.fillMaxSize().padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "$radioName node map",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = networkAccent(network),
-                        )
-                        Text(
-                            "${nodes.size} stored nodes · ${positioned.size} with positions",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                }
-                Spacer(Modifier.height(8.dp))
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(0.56f),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF020714)),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, GlassOutline),
-                ) {
-                    Box(Modifier.fillMaxSize()) {
-                        if (positioned.isNotEmpty()) {
-                            NodeMap(positioned)
-                        } else {
-                            Text(
-                                "No advertised positions received through this radio yet.",
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .padding(24.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = nodeQuery,
-                        onValueChange = { nodeQuery = it },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        label = { Text("Search nodes") },
-                        placeholder = { Text("Name, ID, role, hardware, or channel") },
-                    )
-                    if (nodeQuery.isNotBlank()) {
-                        TextButton(onClick = { nodeQuery = "" }) {
-                            Text("Clear")
-                        }
-                    }
-                }
-                Text(
-                    if (nodeQuery.isBlank()) {
-                        "Stored directory · ${nodes.size} nodes"
-                    } else {
-                        "${filteredNodes.size} of ${nodes.size} nodes"
-                    },
-                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (nodeQuery.isBlank()) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        networkAccent(network)
-                    },
-                )
-                traceError?.let { message ->
-                    Text(
-                        message,
-                        modifier = Modifier.padding(bottom = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(0.44f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items(filteredNodes, key = { "${it.deviceId}:${it.id}" }) { node ->
-                        NodeDirectoryRow(
-                            node = node,
-                            traces = traceResults.filter { it.targetId == node.id },
-                            traceEnabled = connected && node.messageable != false,
-                            onTrace = {
-                                traceError = onTrace(node).exceptionOrNull()?.message
-                            },
-                        )
-                    }
-                    if (nodes.isEmpty()) {
-                        item {
-                            Text(
-                                "Node information will be retained after this radio supplies its " +
-                                    "contact/node database or live adverts.",
-                                modifier = Modifier.padding(12.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    } else if (filteredNodes.isEmpty()) {
-                        item {
-                            Text(
-                                "No nodes match \"$nodeQuery\" on this radio.",
-                                modifier = Modifier.padding(12.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun NodeMap(nodes: List<MeshNode>) {
-    val context = LocalContext.current
-    var map by remember { mutableStateOf<MapLibreMap?>(null) }
-    val markerIcon = remember(context) {
-        val size = (18 * context.resources.displayMetrics.density).toInt().coerceAtLeast(24)
-        val bitmap = android.graphics.Bitmap.createBitmap(
-            size,
-            size,
-            android.graphics.Bitmap.Config.ARGB_8888,
-        )
-        val canvas = android.graphics.Canvas(bitmap)
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        val center = size / 2f
-        paint.color = android.graphics.Color.argb(45, 40, 210, 255)
-        canvas.drawCircle(center, center, size * 0.39f, paint)
-        paint.color = android.graphics.Color.rgb(40, 210, 255)
-        canvas.drawCircle(center, center, size * 0.34f, paint)
-        paint.color = android.graphics.Color.rgb(2, 7, 20)
-        canvas.drawCircle(center, center, size * 0.13f, paint)
-        IconFactory.getInstance(context).fromBitmap(bitmap)
-    }
-    val mapView = remember {
-        MapView(context).apply {
-            onCreate(null)
-            onStart()
-            onResume()
-            getMapAsync { readyMap ->
-                readyMap.setStyle(Style.Builder().fromJson(NODE_MAP_STYLE_JSON)) {
-                    map = readyMap
-                }
-            }
-        }
-    }
-    DisposableEffect(mapView) {
-        onDispose {
-            mapView.onPause()
-            mapView.onStop()
-            mapView.onDestroy()
-        }
-    }
-    LaunchedEffect(map, nodes) {
-        val readyMap = map ?: return@LaunchedEffect
-        readyMap.clear()
-        val coordinates = nodes.mapNotNull { node ->
-            val latitude = node.latitude ?: return@mapNotNull null
-            val longitude = node.longitude ?: return@mapNotNull null
-            val coordinate = LatLng(latitude, longitude)
-            readyMap.addMarker(
-                MarkerOptions()
-                    .position(coordinate)
-                    .title(node.name)
-                    .snippet(nodeMapSnippet(node))
-                    .icon(markerIcon),
-            )
-            coordinate
-        }
-        when (coordinates.size) {
-            0 -> Unit
-            1 -> readyMap.moveCamera(
-                CameraUpdateFactory.newLatLngZoom(coordinates.first(), 11.0),
-            )
-            else -> readyMap.moveCamera(
-                CameraUpdateFactory.newLatLngBounds(
-                    LatLngBounds.Builder().includes(coordinates).build(),
-                    72,
-                ),
-            )
-        }
-    }
-    AndroidView(
-        factory = { mapView },
-        modifier = Modifier.fillMaxSize(),
-    )
-}
-
-@Composable
-private fun NodeDirectoryRow(
+internal fun NodeDirectoryRow(
     node: MeshNode,
     traces: List<TraceRouteResult>,
     traceEnabled: Boolean,
@@ -1538,7 +1316,7 @@ private fun NodeDirectoryRow(
 }
 
 @Composable
-private fun TraceRouteStatus(trace: TraceRouteResult) {
+internal fun TraceRouteStatus(trace: TraceRouteResult) {
     val color = when (trace.state) {
         TraceRouteState.PENDING -> WarningAmber
         TraceRouteState.COMPLETE -> SignalGreen
@@ -1596,16 +1374,7 @@ private fun formatTracePath(hops: List<TraceRouteHop>): String =
         } ?: hop.name
     }
 
-private fun nodeMapSnippet(node: MeshNode): String =
-    buildList {
-        node.role?.let(::add)
-        node.hardware?.takeUnless { it == "UNSET" }?.let(::add)
-        node.altitudeMeters?.let { add("${it}m") }
-        node.hopsAway?.let { add("$it hops") }
-        add(nodeLastSeenLabel(node))
-    }.joinToString(" · ")
-
-private fun nodeLastSeenLabel(node: MeshNode): String {
+internal fun nodeLastSeenLabel(node: MeshNode): String {
     if (node.lastHeardMillis <= 0) return "Last heard unknown"
     val ageMillis = (System.currentTimeMillis() - node.lastHeardMillis).coerceAtLeast(0)
     val age = when {
@@ -2156,35 +1925,3 @@ private const val MAX_VISIBLE_TRACE_HISTORY = 25
 private val TABLET_TWO_PANE_WIDTH = 720.dp
 private const val LAYOUT_PREFERENCES_NAME = "layout_preferences"
 private const val KEY_PHONE_LAYOUT_MODE = "phone_layout_mode"
-private val NODE_MAP_STYLE_JSON = """
-    {
-      "version": 8,
-      "name": "DualMesh node map",
-      "sources": {
-        "osm": {
-          "type": "raster",
-          "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          "tileSize": 256,
-          "maxzoom": 19,
-          "attribution": "© OpenStreetMap contributors"
-        }
-      },
-      "layers": [
-        {
-          "id": "space",
-          "type": "background",
-          "paint": {"background-color": "#020714"}
-        },
-        {
-          "id": "osm",
-          "type": "raster",
-          "source": "osm",
-          "paint": {
-            "raster-saturation": -0.35,
-            "raster-contrast": 0.20,
-            "raster-brightness-max": 0.78
-          }
-        }
-      ]
-    }
-""".trimIndent()
