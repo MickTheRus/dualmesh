@@ -1,6 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Keep private signing material outside the repository. Without this variable, CI
+// continues to build an unsigned release APK.
+val releaseSigningProperties = providers.environmentVariable("DUALMESH_SIGNING_PROPERTIES").orNull?.let { path ->
+    Properties().apply { file(path).inputStream().use { load(it) } }
 }
 
 android {
@@ -11,14 +19,32 @@ android {
         applicationId = "io.dualmesh.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.1.0"
+        versionCode = 8
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // Documentation fixtures run in an isolated app sandbox and never ship in debug/release.
+    signingConfigs {
+        if (releaseSigningProperties != null) {
+            create("production") {
+                fun signingValue(name: String) = requireNotNull(releaseSigningProperties.getProperty(name)) {
+                    "Missing release signing property: $name"
+                }
+                storeFile = file(signingValue("storeFile"))
+                storePassword = signingValue("storePassword")
+                keyAlias = signingValue("keyAlias")
+                keyPassword = signingValue("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
+        getByName("release") {
+            isDebuggable = false
+            if (releaseSigningProperties != null) signingConfig = signingConfigs.getByName("production")
+        }
+        // Documentation fixtures never ship in debug/release.
         create("screenshots") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".screenshots"
