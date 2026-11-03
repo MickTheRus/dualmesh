@@ -1,6 +1,10 @@
 package io.dualmesh.app.ui
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
@@ -127,18 +131,37 @@ fun DualMeshApp(
     }
     var showViewMenu by remember { mutableStateOf(false) }
     var showPacketLog by rememberSaveable { mutableStateOf(false) }
-    var showRadioManager by rememberSaveable { mutableStateOf(false) }
-    var showMap by rememberSaveable { mutableStateOf(false) }
+    var destination by rememberSaveable { mutableStateOf(AppDestination.CHANNELS) }
+    var mapFocus by rememberSaveable { mutableStateOf<String?>(null) }
+    val tabState = rememberSaveableStateHolder()
+    var tabHistory by rememberSaveable { mutableStateOf(arrayListOf(AppDestination.CHANNELS.name)) }
+    fun navigate(tab: AppDestination) {
+        if (tab == destination) return
+        tabHistory = ArrayList(tabHistory + tab.name)
+        destination = tab
+    }
+    BackHandler(tabHistory.size > 1) {
+        tabHistory = ArrayList(tabHistory.dropLast(1))
+        destination = AppDestination.valueOf(tabHistory.last())
+    }
 
     DualMeshTheme {
-        if (showRadioManager) RadioConnectionsDialog(manager, requestScan = requestPermissions, onDismiss = { showRadioManager = false })
-        if (showMap) {
-            MeshMapDialog(manager = manager, onDismiss = { showMap = false })
-        }
         SpaceBackdrop {
         Scaffold(
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onBackground,
+            bottomBar = {
+                NavigationBar {
+                    AppDestination.entries.forEach { tab ->
+                        NavigationBarItem(
+                            selected = destination == tab,
+                            onClick = { navigate(tab); if (tab == AppDestination.MAP) mapFocus = null },
+                            icon = { DestinationIcon(tab) },
+                            label = { Text(tab.label, maxLines = 1) },
+                        )
+                    }
+                }
+            },
             topBar = {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -164,7 +187,6 @@ fun DualMeshApp(
                         }
                     },
                     actions = {
-                        HeaderAction("Nodes") { showMap = true }
                         Box {
                             HeaderAction("View") { showViewMenu = true }
                             DropdownMenu(
@@ -221,156 +243,165 @@ fun DualMeshApp(
                                 )
                             }
                         }
-                        Spacer(Modifier.width(6.dp))
-                        HeaderAction("Radios") { showRadioManager = true }
                         Spacer(Modifier.width(8.dp))
                     },
                 )
             },
         ) { scaffoldPadding ->
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(scaffoldPadding)
-                    .padding(horizontal = 10.dp),
-            ) {
-                val sideBySide = maxWidth >= TABLET_TWO_PANE_WIDTH
-                if (sideBySide) {
-                    Row(Modifier.fillMaxSize()) {
-                        NetworkPane(
-                            network = MeshNetwork.MESHTASTIC,
-                            state = meshtasticState,
-                            connectedDeviceName = meshtasticName,
-                            channels = meshtasticChannels,
-                            selectedChannel = meshtasticSelected,
-                            capacity = meshtasticCapacity,
-                            contacts = meshtasticContacts,
-                            messages = messages,
-                            nodes = nodes,
-                            selectedConversationIds = selectedConversationIds,
-                            packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
+            Box(Modifier.fillMaxSize().padding(scaffoldPadding)) {
+                tabState.SaveableStateProvider(destination) {
+                    when (destination) {
+                        AppDestination.NODES -> MeshMapDialog(manager, embedded = true,
+                            onNavigateMap = { mapFocus = mapNodeKey(it); navigate(AppDestination.MAP) }, onDismiss = {})
+                        AppDestination.MAP -> MeshMapDialog(manager, initialDirectory = false, embedded = true,
+                            focusNodeKey = mapFocus, onNavigateNodes = { navigate(AppDestination.NODES) }, onDismiss = {})
+                        AppDestination.SETTINGS -> RadioSettingsScreen(manager, onConnections = { navigate(AppDestination.CONNECTIONS) })
+                        AppDestination.CONNECTIONS -> RadioConnectionsDialog(manager, requestScan = requestPermissions, embedded = true, onDismiss = {})
+                        AppDestination.CHANNELS -> BoxWithConstraints(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 10.dp),
+                        ) {
+                            val sideBySide = maxWidth >= TABLET_TWO_PANE_WIDTH
+                            if (sideBySide) {
+                                Row(Modifier.fillMaxSize()) {
+                                    NetworkPane(
+                                        network = MeshNetwork.MESHTASTIC,
+                                        state = meshtasticState,
+                                        connectedDeviceName = meshtasticName,
+                                        channels = meshtasticChannels,
+                                        selectedChannel = meshtasticSelected,
+                                        capacity = meshtasticCapacity,
+                                        contacts = meshtasticContacts,
+                                        messages = messages,
+                                        nodes = nodes,
+                                        selectedConversationIds = selectedConversationIds,
+                                        packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
 
-                            deviceConnections = meshtasticConnections,
-                            selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
-                            viewModel = viewModel,
-                            requestPermissions = requestPermissions,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        NetworkPane(
-                            network = MeshNetwork.MESHCORE,
-                            state = meshCoreState,
-                            connectedDeviceName = meshCoreName,
-                            channels = meshCoreChannels,
-                            selectedChannel = meshCoreSelected,
-                            capacity = meshCoreCapacity,
-                            contacts = meshCoreContacts,
-                            messages = messages,
-                            nodes = nodes,
-                            selectedConversationIds = selectedConversationIds,
-                            packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
+                                        deviceConnections = meshtasticConnections,
+                                        selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
+                                        viewModel = viewModel,
+                                        requestPermissions = requestPermissions,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    NetworkPane(
+                                        network = MeshNetwork.MESHCORE,
+                                        state = meshCoreState,
+                                        connectedDeviceName = meshCoreName,
+                                        channels = meshCoreChannels,
+                                        selectedChannel = meshCoreSelected,
+                                        capacity = meshCoreCapacity,
+                                        contacts = meshCoreContacts,
+                                        messages = messages,
+                                        nodes = nodes,
+                                        selectedConversationIds = selectedConversationIds,
+                                        packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
 
-                            deviceConnections = meshCoreConnections,
-                            selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
-                            viewModel = viewModel,
-                            requestPermissions = requestPermissions,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                } else if (phoneLayoutMode == PhoneLayoutMode.STACKED) {
-                    Column(Modifier.fillMaxSize()) {
-                        NetworkPane(
-                            network = MeshNetwork.MESHTASTIC,
-                            state = meshtasticState,
-                            connectedDeviceName = meshtasticName,
-                            channels = meshtasticChannels,
-                            selectedChannel = meshtasticSelected,
-                            capacity = meshtasticCapacity,
-                            contacts = meshtasticContacts,
-                            messages = messages,
-                            nodes = nodes,
-                            selectedConversationIds = selectedConversationIds,
-                            packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
+                                        deviceConnections = meshCoreConnections,
+                                        selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
+                                        viewModel = viewModel,
+                                        requestPermissions = requestPermissions,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            } else if (phoneLayoutMode == PhoneLayoutMode.STACKED) {
+                                Column(Modifier.fillMaxSize()) {
+                                    NetworkPane(
+                                        network = MeshNetwork.MESHTASTIC,
+                                        state = meshtasticState,
+                                        connectedDeviceName = meshtasticName,
+                                        channels = meshtasticChannels,
+                                        selectedChannel = meshtasticSelected,
+                                        capacity = meshtasticCapacity,
+                                        contacts = meshtasticContacts,
+                                        messages = messages,
+                                        nodes = nodes,
+                                        selectedConversationIds = selectedConversationIds,
+                                        packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
 
-                            deviceConnections = meshtasticConnections,
-                            selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
-                            viewModel = viewModel,
-                            requestPermissions = requestPermissions,
-                            modifier = Modifier.weight(1f),
-                        )
-                        HorizontalDivider()
-                        NetworkPane(
-                            network = MeshNetwork.MESHCORE,
-                            state = meshCoreState,
-                            connectedDeviceName = meshCoreName,
-                            channels = meshCoreChannels,
-                            selectedChannel = meshCoreSelected,
-                            capacity = meshCoreCapacity,
-                            contacts = meshCoreContacts,
-                            messages = messages,
-                            nodes = nodes,
-                            selectedConversationIds = selectedConversationIds,
-                            packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
+                                        deviceConnections = meshtasticConnections,
+                                        selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
+                                        viewModel = viewModel,
+                                        requestPermissions = requestPermissions,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    HorizontalDivider()
+                                    NetworkPane(
+                                        network = MeshNetwork.MESHCORE,
+                                        state = meshCoreState,
+                                        connectedDeviceName = meshCoreName,
+                                        channels = meshCoreChannels,
+                                        selectedChannel = meshCoreSelected,
+                                        capacity = meshCoreCapacity,
+                                        contacts = meshCoreContacts,
+                                        messages = messages,
+                                        nodes = nodes,
+                                        selectedConversationIds = selectedConversationIds,
+                                        packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
 
-                            deviceConnections = meshCoreConnections,
-                            selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
-                            viewModel = viewModel,
-                            requestPermissions = requestPermissions,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                } else {
-                    Column(Modifier.fillMaxSize()) {
-                        FocusedNetworkSelector(
-                            selected = selectedNetwork,
-                            meshCoreState = meshCoreState,
-                            meshtasticState = meshtasticState,
-                            packetLoggingNetworks = packetLoggingNetworks,
-                            onSelect = viewModel::selectNetwork,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        when (selectedNetwork) {
-                            MeshNetwork.MESHTASTIC -> NetworkPane(
-                                network = MeshNetwork.MESHTASTIC,
-                                state = meshtasticState,
-                                connectedDeviceName = meshtasticName,
-                                channels = meshtasticChannels,
-                                selectedChannel = meshtasticSelected,
-                                capacity = meshtasticCapacity,
-                                contacts = meshtasticContacts,
-                                messages = messages,
-                                nodes = nodes,
-                                selectedConversationIds = selectedConversationIds,
-                                packetLogging =
-                                    MeshNetwork.MESHTASTIC in packetLoggingNetworks,
+                                        deviceConnections = meshCoreConnections,
+                                        selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
+                                        viewModel = viewModel,
+                                        requestPermissions = requestPermissions,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            } else {
+                                Column(Modifier.fillMaxSize()) {
+                                    FocusedNetworkSelector(
+                                        selected = selectedNetwork,
+                                        meshCoreState = meshCoreState,
+                                        meshtasticState = meshtasticState,
+                                        packetLoggingNetworks = packetLoggingNetworks,
+                                        onSelect = viewModel::selectNetwork,
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                    when (selectedNetwork) {
+                                        MeshNetwork.MESHTASTIC -> NetworkPane(
+                                            network = MeshNetwork.MESHTASTIC,
+                                            state = meshtasticState,
+                                            connectedDeviceName = meshtasticName,
+                                            channels = meshtasticChannels,
+                                            selectedChannel = meshtasticSelected,
+                                            capacity = meshtasticCapacity,
+                                            contacts = meshtasticContacts,
+                                            messages = messages,
+                                            nodes = nodes,
+                                            selectedConversationIds = selectedConversationIds,
+                                            packetLogging =
+                                                MeshNetwork.MESHTASTIC in packetLoggingNetworks,
 
-                                deviceConnections = meshtasticConnections,
-                                selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
-                                viewModel = viewModel,
-                                requestPermissions = requestPermissions,
-                                showNetworkHeader = false,
-                                modifier = Modifier.weight(1f),
-                            )
-                            MeshNetwork.MESHCORE -> NetworkPane(
-                                network = MeshNetwork.MESHCORE,
-                                state = meshCoreState,
-                                connectedDeviceName = meshCoreName,
-                                channels = meshCoreChannels,
-                                selectedChannel = meshCoreSelected,
-                                capacity = meshCoreCapacity,
-                                contacts = meshCoreContacts,
-                                messages = messages,
-                                nodes = nodes,
-                                selectedConversationIds = selectedConversationIds,
-                                packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
+                                            deviceConnections = meshtasticConnections,
+                                            selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
+                                            viewModel = viewModel,
+                                            requestPermissions = requestPermissions,
+                                            showNetworkHeader = false,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        MeshNetwork.MESHCORE -> NetworkPane(
+                                            network = MeshNetwork.MESHCORE,
+                                            state = meshCoreState,
+                                            connectedDeviceName = meshCoreName,
+                                            channels = meshCoreChannels,
+                                            selectedChannel = meshCoreSelected,
+                                            capacity = meshCoreCapacity,
+                                            contacts = meshCoreContacts,
+                                            messages = messages,
+                                            nodes = nodes,
+                                            selectedConversationIds = selectedConversationIds,
+                                            packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
 
-                                deviceConnections = meshCoreConnections,
-                                selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
-                                viewModel = viewModel,
-                                requestPermissions = requestPermissions,
-                                showNetworkHeader = false,
-                                modifier = Modifier.weight(1f),
-                            )
+                                            deviceConnections = meshCoreConnections,
+                                            selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
+                                            viewModel = viewModel,
+                                            requestPermissions = requestPermissions,
+                                            showNetworkHeader = false,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

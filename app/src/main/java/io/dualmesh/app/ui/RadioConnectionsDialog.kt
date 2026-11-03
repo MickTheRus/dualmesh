@@ -13,8 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.dualmesh.app.DualMeshManager
 import io.dualmesh.app.backend.MultiDeviceBackend
@@ -30,7 +28,7 @@ internal fun ConnectionProfileStore.Transport.displayName(): String = when (this
 }
 
 @Composable
-internal fun RadioConnectionsDialog(manager: DualMeshManager, initialNetwork: MeshNetwork? = null, requestScan: () -> Unit, onDismiss: () -> Unit) {
+internal fun RadioConnectionsDialog(manager: DualMeshManager, initialNetwork: MeshNetwork? = null, requestScan: () -> Unit, embedded: Boolean = false, onDismiss: () -> Unit) {
     val history by manager.connectionHistory.collectAsStateWithLifecycle()
     val mc by manager.meshCore.deviceConnections.collectAsStateWithLifecycle()
     val mt by manager.meshtastic.deviceConnections.collectAsStateWithLifecycle()
@@ -97,12 +95,12 @@ internal fun RadioConnectionsDialog(manager: DualMeshManager, initialNetwork: Me
         }
         HorizontalDivider(thickness = 0.5.dp)
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
+    ScreenPresentation(embedded, onDismiss) {
         MaterialTheme(typography = Typography()) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Column(Modifier.fillMaxSize().then(if (embedded) Modifier else Modifier.safeDrawingPadding())) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = onDismiss) { Text("‹ Back") }
+                        if (!embedded) TextButton(onClick = onDismiss) { Text("‹ Back") }
                         Text("Radio connections", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                     }
                     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -154,7 +152,7 @@ internal fun RadioConnectionsDialog(manager: DualMeshManager, initialNetwork: Me
 
 @Composable
 private fun AddWifiRadioDialog(initialNetwork: MeshNetwork, onDismiss: () -> Unit, onAdd: (MeshNetwork, String, String) -> Result<Unit>) {
-    var network by remember { mutableStateOf(initialNetwork) }
+    var network by rememberSaveable { mutableStateOf(initialNetwork) }
     var endpoint by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }

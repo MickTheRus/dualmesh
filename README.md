@@ -31,13 +31,15 @@ The screenshots contain test data. They do not contain data from a real deployme
 
 1. Install the debug APK.
 2. Give the app access to Nearby devices and notifications.
-3. Select **Manage** in the applicable network pane.
+3. Open the **Connections** tab (or **Manage** in either network pane).
 4. Filter by Bluetooth, Wi-Fi/TCP, or USB/serial and enable the radio or radios you want.
 5. For Wi-Fi/TCP, add a host name or `host:port` with the matching mesh protocol.
 6. Default ports are `5000` for MeshCore and `4403` for Meshtastic.
 7. Select a radio.
 8. Select one of its channels or direct-message conversations.
-9. Select **Nodes** or **Nodes / Map** to open the compact node list, then **Map** for positions.
+9. Use the bottom tabs: **Channels**, **Nodes**, **Map**, **Settings**, and **Connections**.
+   Channels retains the two-mesh inbox; Nodes opens the directory and Map shows positions.
+   Settings lets you choose a connected radio to configure.
 10. Search by node name, ID, role, hardware, channel, or radio name. Use MC/MT chips and
     **Filters** to select networks, radios, node roles, and last-heard limits.
 11. Star nodes to save favorites; use **★ Favorites** to filter them. Open a node for grouped
