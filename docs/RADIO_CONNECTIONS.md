@@ -1,6 +1,6 @@
 # Radio connections
 
-Open the **Connections** tab, or **Manage** in either network pane. The connection manager
+Open the **Connections** tab. The connection manager
 stays open as radios connect, so multiple devices can be selected. Tab switches preserve its
 transport/network filters and search. The **Settings** tab lists connected radios for configuration.
 
@@ -8,6 +8,9 @@ Filter by **All**, **Bluetooth**, **Wi-Fi / TCP**, or **USB / serial**, and by *
 **MC**, or **MT**. Search matches saved names and endpoints; USB serial numbers are searchable
 when permission makes them available. Saved radios are kept separate from newly discovered
 Bluetooth and attached USB devices.
+
+Channels shows only a compact read-only name/status for the selected radio. Enable, disconnect,
+retry, forget, and outbound selection all live in Connections.
 
 ## Picking radios
 

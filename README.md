@@ -10,33 +10,38 @@ other mesh.
 
 ## Screenshots
 
-The screenshots contain test data. They do not contain data from a real deployment.
+The current phone and tablet screens use fictional data from an isolated screenshot build.
+No real messages, node identities, radio endpoints, or locations are included.
+[Full gallery and capture instructions](docs/SCREENSHOTS.md).
 
 <p>
-  <img src="docs/screenshots/tablet-dual-pane-redacted.png"
-       alt="DualMesh tablet with Meshtastic and MeshCore side by side" width="860">
+  <img src="docs/screenshots/tablet-channels.png" alt="Clean Channels tab with both meshes side by side" width="860">
 </p>
 <p>
-  <img src="docs/screenshots/phone-inbox-redacted.png" alt="DualMesh phone inbox" width="280">
-  <img src="docs/screenshots/phone-node-map-redacted.png" alt="DualMesh phone node map" width="280">
+  <img src="docs/screenshots/phone-focused.png" alt="Focused Channels tab with delivery receipts, RF/MQTT source, hops and reactions" width="260">
+  <img src="docs/screenshots/phone-nodes.png" alt="Nodes tab with favorites and MC/MT filters" width="260">
+  <img src="docs/screenshots/phone-map.png" alt="Map tab with fictional node locations" width="260">
 </p>
 <p>
-  <img src="docs/screenshots/android-auto-messages-redacted.png"
-       alt="DualMesh Android Auto messages" width="420">
-  <img src="docs/screenshots/android-auto-node-map-redacted.png"
-       alt="DualMesh Android Auto node map" width="420">
+  <img src="docs/screenshots/phone-reactions.png" alt="Native Meshtastic quick-reaction picker" width="260">
+  <img src="docs/screenshots/phone-settings.png" alt="Settings tab with radio configuration, layout preferences and packet logs" width="260">
+  <img src="docs/screenshots/phone-connections.png" alt="Connections tab with Bluetooth, Wi-Fi and USB radio management" width="260">
+</p>
+<p>
+  <img src="docs/screenshots/android-auto-messages-redacted.png" alt="DualMesh Android Auto messages" width="420">
+  <img src="docs/screenshots/android-auto-node-map-redacted.png" alt="DualMesh Android Auto node map" width="420">
 </p>
 
 ## Quick start
 
 1. Install the debug APK.
 2. Give the app access to Nearby devices and notifications.
-3. Open the **Connections** tab (or **Manage** in either network pane).
+3. Open the **Connections** tab.
 4. Filter by Bluetooth, Wi-Fi/TCP, or USB/serial and enable the radio or radios you want.
 5. For Wi-Fi/TCP, add a host name or `host:port` with the matching mesh protocol.
 6. Default ports are `5000` for MeshCore and `4403` for Meshtastic.
-7. Select a radio.
-8. Select one of its channels or direct-message conversations.
+7. Choose **Use for messages** for the outbound radio on each mesh.
+8. In **Channels**, tap the chat heading to select a channel or direct-message conversation.
 9. Use the bottom tabs: **Channels**, **Nodes**, **Map**, **Settings**, and **Connections**.
    Channels retains the two-mesh inbox; Nodes opens the directory and Map shows positions.
    Settings lets you choose a connected radio to configure.
@@ -50,7 +55,7 @@ The screenshots contain test data. They do not contain data from a real deployme
 Long-press a Meshtastic message or tap **React** to add an emoji. Tap an existing reaction to
 add the same emoji; long-press its chip to see who reacted and your delivery status.
 
-Enable packet recording under **View > Packet logs** only when you must record protocol traffic.
+Enable packet recording under **Settings > Packet logs** only when you must record protocol traffic.
 
 WARNING: A packet log can contain keys, messages, node IDs, and locations.
 
@@ -62,7 +67,7 @@ Meshtastic app or CLI): enable **MQTT** and **Proxy to client enabled**, then se
 TLS, and root topic. Enable channel **Uplink** and/or **Downlink** as needed.
 
 Reconnect the radio in DualMesh after changing settings in another app. DualMesh reads these
-settings from the radio and starts the proxy automatically. Open **Manage** to see each radio's
+settings from the radio and starts the proxy automatically. Open **Connections** to see each radio's
 MQTT proxy status. Stop the radio connection, or disable its MQTT client proxy setting and
 reconnect, to stop relaying.
 
@@ -75,12 +80,12 @@ or excess downlink traffic when the radio transport is busy.
 
 ### Radio management
 
-Open **Radios** (or **Manage** in either mesh pane). Filter by Bluetooth, Wi-Fi/TCP, USB/serial,
+Open **Connections**. Filter by Bluetooth, Wi-Fi/TCP, USB/serial,
 and mesh protocol. Enable multiple radios to receive independently; choose **Use for messages**
 for the outbound radio on each mesh. Each row shows connection errors and automatic-retry status.
 Add Wi-Fi endpoints manually or select an attached USB serial device and approve access.
 See [radio connections](docs/RADIO_CONNECTIONS.md) for compatibility and permissions.
-Packet logs are available under **View > Packet logs**.
+Packet logs are available under **Settings > Packet logs**.
 
 ### Node statistics and announcements
 
@@ -96,7 +101,7 @@ support and response behavior.
 
 ### Radio settings
 
-Select a connected radio, then tap **Settings** beside its radio selector. DualMesh reads
+Open the **Settings** tab and select a connected radio. DualMesh reads
 settings once per connection and reuses them when you return. Tap **Refresh** for a full reread.
 Open a section, edit its fields, and select **Save**.
 Each save reads the current values first, changes only the edited fields, and reads the result

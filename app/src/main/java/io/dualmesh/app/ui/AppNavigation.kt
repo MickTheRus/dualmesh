@@ -59,7 +59,8 @@ internal fun DestinationIcon(destination: AppDestination) {
 }
 
 @Composable
-internal fun RadioSettingsScreen(manager: DualMeshManager, onConnections: () -> Unit) {
+internal fun RadioSettingsScreen(manager: DualMeshManager, layout: PhoneLayoutMode,
+    onLayoutChange: (PhoneLayoutMode) -> Unit, onPacketLogs: () -> Unit) {
     val mc by manager.meshCore.deviceConnections.collectAsStateWithLifecycle()
     val mt by manager.meshtastic.deviceConnections.collectAsStateWithLifecycle()
     val connections = mt + mc
@@ -67,7 +68,7 @@ internal fun RadioSettingsScreen(manager: DualMeshManager, onConnections: () -> 
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             Text("Settings", Modifier.padding(16.dp), style = MaterialTheme.typography.titleLarge)
-            Text("Choose a radio to configure. Settings are cached for each connection; use Refresh to read them again.", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyMedium)
+            Text("Radios", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
         }
         items(connections, key = { MultiDeviceBackend.targetId(it.profile) }) { connection ->
             val id = MultiDeviceBackend.targetId(connection.profile)
@@ -80,8 +81,18 @@ internal fun RadioSettingsScreen(manager: DualMeshManager, onConnections: () -> 
             HorizontalDivider(thickness = 0.5.dp)
         }
         item {
-            if (connections.isEmpty()) Text("Connect a radio to view its settings.", Modifier.padding(16.dp))
-            TextButton(onClick = onConnections, modifier = Modifier.padding(8.dp)) { Text("Manage connections") }
+            if (connections.isEmpty()) Text("Choose a radio in Connections to view its settings.", Modifier.padding(16.dp))
+            Spacer(Modifier.height(16.dp))
+            Text("App", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
+            Text("Phone layout", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodyLarge)
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PhoneLayoutMode.entries.forEach { mode ->
+                    FilterChip(selected = layout == mode, onClick = { onLayoutChange(mode) }, label = { Text(mode.label) })
+                }
+            }
+            Text("Focused shows one mesh; Stacked shows both. Tablets use side by side.", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+            ListItem(headlineContent = { Text("Packet logs") }, supportingContent = { Text("Inspect or record protocol traffic") },
+                trailingContent = { Text("›") }, modifier = Modifier.clickable(onClick = onPacketLogs))
         }
     }
     val editing = connections.firstOrNull { MultiDeviceBackend.targetId(it.profile) == editingId }

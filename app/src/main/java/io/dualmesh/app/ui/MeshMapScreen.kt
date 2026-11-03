@@ -425,12 +425,12 @@ private fun MeshNodeMap(
             markerNodes[marker.id] = node
         }
         if (!hasFitted && nodes.isNotEmpty()) {
-            fitMapNodes(ready, nodes)
+            fitMapNodes(ready, nodes, (80 * context.resources.displayMetrics.density).toInt().coerceAtMost(minOf(mapView.width, mapView.height).coerceAtLeast(0) / 3))
             hasFitted = true
         }
     }
     LaunchedEffect(map, fitRequest) {
-        if (fitRequest > 0) map?.let { fitMapNodes(it, nodes) }
+        if (fitRequest > 0) map?.let { fitMapNodes(it, nodes, (80 * context.resources.displayMetrics.density).toInt().coerceAtMost(minOf(mapView.width, mapView.height).coerceAtLeast(0) / 3)) }
     }
     var lastSelectionKey by rememberSaveable { mutableStateOf<String?>(null) }
     val selectionKey = selected?.let(::mapNodeKey)
@@ -444,14 +444,14 @@ private fun MeshNodeMap(
     AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 }
 
-private fun fitMapNodes(map: MapLibreMap, nodes: List<MeshNode>) {
+private fun fitMapNodes(map: MapLibreMap, nodes: List<MeshNode>, padding: Int) {
     val coordinates = nodes.map { LatLng(it.latitude!!, it.longitude!!) }
     when (coordinates.size) {
         0 -> Unit
         1 -> map.animateCamera(CameraUpdateFactory.newLatLngZoom(coordinates.first(), 11.0))
         else -> {
             if (coordinates.distinct().size == 1) map.animateCamera(CameraUpdateFactory.newLatLngZoom(coordinates.first(), 11.0))
-            else map.animateCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(coordinates).build(), 80))
+            else map.animateCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(coordinates).build(), padding))
         }
     }
 }

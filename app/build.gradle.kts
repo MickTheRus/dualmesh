@@ -17,6 +17,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Documentation fixtures run in an isolated app sandbox and never ship in debug/release.
+    buildTypes {
+        create("screenshots") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".screenshots"
+            versionNameSuffix = "-screenshots"
+            matchingFallbacks += "debug"
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true

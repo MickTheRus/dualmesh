@@ -15,7 +15,7 @@ link-layer traffic, IP packets, or TCP packets.
 
 ## Start a packet log
 
-1. Select **Packets**.
+1. Open **Settings > Packet logs**.
 2. Enable Meshtastic, MeshCore, or both networks.
 3. Connect a radio or wait for traffic.
 4. Select a row to see its full hexadecimal payload.

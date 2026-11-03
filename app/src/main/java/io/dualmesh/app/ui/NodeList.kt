@@ -49,7 +49,7 @@ internal fun CompactNodeRow(node: MeshNode, favorite: Boolean = false, onFavorit
         }
         FavoriteNodeButton(favorite, onFavorite)
         Column(horizontalAlignment = Alignment.End) {
-            Text(if (node.viaMqtt == true) "MQTT" else node.hopsAway?.let { if (it == 0) "Direct" else "$it hops" } ?: "—", style = MaterialTheme.typography.labelMedium)
+            Text(if (node.viaMqtt == true) "MQTT" else node.hopsAway?.let { if (it == 0) "Direct" else if (it == 1) "1 hop" else "$it hops" } ?: "—", style = MaterialTheme.typography.labelMedium)
             node.snr?.let { Text("%.1f dB".format(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }

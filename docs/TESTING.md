@@ -117,7 +117,7 @@ channel users before you transmit test data.
 Use a private test mesh or coordinate the test with its users. A traceroute uses RF airtime.
 
 1. Select one connected radio.
-2. Open **Nodes / Map**.
+2. Open the **Nodes** tab.
 3. Select **Trace** on one remote node.
 4. Make sure that the row shows `Trace in progress`.
 5. Make sure that a response changes the state to `Trace complete`.
@@ -140,7 +140,7 @@ Do not use repeated traceroutes as a load test on a shared mesh.
 
 ## Packet-log test
 
-1. Open **Packets**.
+1. Open **Settings > Packet logs**.
 2. Enable both networks.
 3. Reconnect the radios.
 4. Do not transmit during the initial capture.
@@ -152,9 +152,19 @@ Do not use repeated traceroutes as a load test on a shared mesh.
 10. Make sure that the file does not increase in size.
 11. Make sure that the file stays in Downloads.
 
+## Channels navigation check
+
+Channels should show the radio name/status, chat selector, message history, and composer.
+Confirm that Manage, Disconnect, radio Settings, and Nodes/Map shortcuts are absent. Select a
+radio under Connections and confirm that the channel pane's read-only status changes. Open
+Settings to change the phone layout or inspect packet logs. Back from a settings editor should
+return to the Settings tab; chat selection and drafts should survive tab changes.
+
+Documentation images use a separate fixture package: see [screenshot capture](SCREENSHOTS.md).
+
 ## Layout test
 
-1. Open **View**.
+1. Open **Settings > Phone layout**.
 2. Select **Focused**.
 3. Change the selected network.
 4. Stop and restart the app.
@@ -167,7 +177,7 @@ Do not use repeated traceroutes as a load test on a shared mesh.
 
 ## Node test
 
-1. Select **Nodes / Map** for each radio.
+1. Open the **Nodes** tab.
 2. Use **Filters > Radio** to compare the node count with one radio, then select **All radios**.
 3. Toggle MC and MT independently and compare the position count with the visible markers.
 4. Examine marker names, node IDs, hop data, SNR, and coordinates.

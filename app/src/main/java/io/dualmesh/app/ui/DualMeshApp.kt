@@ -9,6 +9,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -46,8 +47,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,7 +60,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalContext
@@ -69,7 +67,6 @@ import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.dualmesh.app.MainViewModel
 import io.dualmesh.app.backend.MultiDeviceBackend
-import io.dualmesh.app.connection.ConnectionProfileStore
 import io.dualmesh.app.logging.PacketDirection
 import io.dualmesh.app.logging.PacketLogEntry
 import io.dualmesh.app.logging.PacketLogger
@@ -86,7 +83,7 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
-private enum class PhoneLayoutMode(val label: String) {
+internal enum class PhoneLayoutMode(val label: String) {
     FOCUSED("Focused"),
     STACKED("Stacked"),
 }
@@ -103,8 +100,6 @@ fun DualMeshApp(
     val nodes by manager.nodes.collectAsStateWithLifecycle()
     val meshCoreState by manager.meshCore.connectionState.collectAsStateWithLifecycle()
     val meshtasticState by manager.meshtastic.connectionState.collectAsStateWithLifecycle()
-    val meshCoreName by manager.meshCore.connectedDeviceName.collectAsStateWithLifecycle()
-    val meshtasticName by manager.meshtastic.connectedDeviceName.collectAsStateWithLifecycle()
     val meshCoreChannels by manager.meshCore.channels.collectAsStateWithLifecycle()
     val meshtasticChannels by manager.meshtastic.channels.collectAsStateWithLifecycle()
     val meshCoreCapacity by manager.meshCore.channelCapacity.collectAsStateWithLifecycle()
@@ -131,7 +126,6 @@ fun DualMeshApp(
                 ?: PhoneLayoutMode.STACKED,
         )
     }
-    var showViewMenu by remember { mutableStateOf(false) }
     var showPacketLog by rememberSaveable { mutableStateOf(false) }
     var destination by rememberSaveable { mutableStateOf(AppDestination.CHANNELS) }
     var mapFocus by rememberSaveable { mutableStateOf<String?>(null) }
@@ -164,91 +158,6 @@ fun DualMeshApp(
                     }
                 }
             },
-            topBar = {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = GlassSurfaceStrong,
-                    ),
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OrbitalMark()
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    "DualMesh",
-                                    style = MaterialTheme.typography.titleLarge,
-                                )
-                                Text(
-                                    "ONE INBOX  ·  TWO MESHES",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    letterSpacing = 0.9.sp,
-                                )
-                            }
-                        }
-                    },
-                    actions = {
-                        Box {
-                            HeaderAction("View") { showViewMenu = true }
-                            DropdownMenu(
-                                expanded = showViewMenu,
-                                onDismissRequest = { showViewMenu = false },
-                            ) {
-                                DropdownMenuItem(text = { Text("Packet logs") }, onClick = { showViewMenu = false; showPacketLog = true })
-                                HorizontalDivider()
-                                Text(
-                                    "Phone layout",
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                PhoneLayoutMode.entries.forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Column {
-                                                Text(
-                                                    mode.label,
-                                                    fontWeight = if (phoneLayoutMode == mode) {
-                                                        FontWeight.Bold
-                                                    } else {
-                                                        FontWeight.Normal
-                                                    },
-                                                )
-                                                Text(
-                                                    when (mode) {
-                                                        PhoneLayoutMode.FOCUSED ->
-                                                            "One network at a time"
-                                                        PhoneLayoutMode.STACKED ->
-                                                            "Meshtastic above MeshCore"
-                                                    },
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                            }
-                                        },
-                                        onClick = {
-                                            phoneLayoutMode = mode
-                                            layoutPreferences.edit {
-                                                putString(KEY_PHONE_LAYOUT_MODE, mode.name)
-                                            }
-                                            showViewMenu = false
-                                        },
-                                    )
-                                }
-                                HorizontalDivider()
-                                Text(
-                                    "Tablets always use side by side.",
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(8.dp))
-                    },
-                )
-            },
         ) { scaffoldPadding ->
             Box(Modifier.fillMaxSize().padding(scaffoldPadding)) {
                 tabState.SaveableStateProvider(destination) {
@@ -257,7 +166,11 @@ fun DualMeshApp(
                             onNavigateMap = { mapFocus = mapNodeKey(it); navigate(AppDestination.MAP) }, onDismiss = {})
                         AppDestination.MAP -> MeshMapDialog(manager, initialDirectory = false, embedded = true,
                             focusNodeKey = mapFocus, onNavigateNodes = { navigate(AppDestination.NODES) }, onDismiss = {})
-                        AppDestination.SETTINGS -> RadioSettingsScreen(manager, onConnections = { navigate(AppDestination.CONNECTIONS) })
+                        AppDestination.SETTINGS -> RadioSettingsScreen(manager, phoneLayoutMode,
+                            onLayoutChange = { mode ->
+                                phoneLayoutMode = mode
+                                layoutPreferences.edit { putString(KEY_PHONE_LAYOUT_MODE, mode.name) }
+                            }, onPacketLogs = { showPacketLog = true })
                         AppDestination.CONNECTIONS -> RadioConnectionsDialog(manager, requestScan = requestPermissions, embedded = true, onDismiss = {})
                         AppDestination.CHANNELS -> BoxWithConstraints(
                             modifier = Modifier
@@ -269,8 +182,6 @@ fun DualMeshApp(
                                 Row(Modifier.fillMaxSize()) {
                                     NetworkPane(
                                         network = MeshNetwork.MESHTASTIC,
-                                        state = meshtasticState,
-                                        connectedDeviceName = meshtasticName,
                                         channels = meshtasticChannels,
                                         selectedChannel = meshtasticSelected,
                                         capacity = meshtasticCapacity,
@@ -279,18 +190,14 @@ fun DualMeshApp(
                                         nodes = nodes,
                                         selectedConversationIds = selectedConversationIds,
                                         packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
-
                                         deviceConnections = meshtasticConnections,
                                         selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
                                         viewModel = viewModel,
-                                        requestPermissions = requestPermissions,
                                         modifier = Modifier.weight(1f),
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     NetworkPane(
                                         network = MeshNetwork.MESHCORE,
-                                        state = meshCoreState,
-                                        connectedDeviceName = meshCoreName,
                                         channels = meshCoreChannels,
                                         selectedChannel = meshCoreSelected,
                                         capacity = meshCoreCapacity,
@@ -299,11 +206,9 @@ fun DualMeshApp(
                                         nodes = nodes,
                                         selectedConversationIds = selectedConversationIds,
                                         packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
-
                                         deviceConnections = meshCoreConnections,
                                         selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
                                         viewModel = viewModel,
-                                        requestPermissions = requestPermissions,
                                         modifier = Modifier.weight(1f),
                                     )
                                 }
@@ -311,8 +216,6 @@ fun DualMeshApp(
                                 Column(Modifier.fillMaxSize()) {
                                     NetworkPane(
                                         network = MeshNetwork.MESHTASTIC,
-                                        state = meshtasticState,
-                                        connectedDeviceName = meshtasticName,
                                         channels = meshtasticChannels,
                                         selectedChannel = meshtasticSelected,
                                         capacity = meshtasticCapacity,
@@ -321,18 +224,14 @@ fun DualMeshApp(
                                         nodes = nodes,
                                         selectedConversationIds = selectedConversationIds,
                                         packetLogging = MeshNetwork.MESHTASTIC in packetLoggingNetworks,
-
                                         deviceConnections = meshtasticConnections,
                                         selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
                                         viewModel = viewModel,
-                                        requestPermissions = requestPermissions,
                                         modifier = Modifier.weight(1f),
                                     )
                                     HorizontalDivider()
                                     NetworkPane(
                                         network = MeshNetwork.MESHCORE,
-                                        state = meshCoreState,
-                                        connectedDeviceName = meshCoreName,
                                         channels = meshCoreChannels,
                                         selectedChannel = meshCoreSelected,
                                         capacity = meshCoreCapacity,
@@ -341,11 +240,9 @@ fun DualMeshApp(
                                         nodes = nodes,
                                         selectedConversationIds = selectedConversationIds,
                                         packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
-
                                         deviceConnections = meshCoreConnections,
                                         selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
                                         viewModel = viewModel,
-                                        requestPermissions = requestPermissions,
                                         modifier = Modifier.weight(1f),
                                     )
                                 }
@@ -362,8 +259,6 @@ fun DualMeshApp(
                                     when (selectedNetwork) {
                                         MeshNetwork.MESHTASTIC -> NetworkPane(
                                             network = MeshNetwork.MESHTASTIC,
-                                            state = meshtasticState,
-                                            connectedDeviceName = meshtasticName,
                                             channels = meshtasticChannels,
                                             selectedChannel = meshtasticSelected,
                                             capacity = meshtasticCapacity,
@@ -373,18 +268,14 @@ fun DualMeshApp(
                                             selectedConversationIds = selectedConversationIds,
                                             packetLogging =
                                                 MeshNetwork.MESHTASTIC in packetLoggingNetworks,
-
                                             deviceConnections = meshtasticConnections,
                                             selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHTASTIC],
                                             viewModel = viewModel,
-                                            requestPermissions = requestPermissions,
                                             showNetworkHeader = false,
                                             modifier = Modifier.weight(1f),
                                         )
                                         MeshNetwork.MESHCORE -> NetworkPane(
                                             network = MeshNetwork.MESHCORE,
-                                            state = meshCoreState,
-                                            connectedDeviceName = meshCoreName,
                                             channels = meshCoreChannels,
                                             selectedChannel = meshCoreSelected,
                                             capacity = meshCoreCapacity,
@@ -393,11 +284,9 @@ fun DualMeshApp(
                                             nodes = nodes,
                                             selectedConversationIds = selectedConversationIds,
                                             packetLogging = MeshNetwork.MESHCORE in packetLoggingNetworks,
-
                                             deviceConnections = meshCoreConnections,
                                             selectedDeviceId = selectedDeviceIds[MeshNetwork.MESHCORE],
                                             viewModel = viewModel,
-                                            requestPermissions = requestPermissions,
                                             showNetworkHeader = false,
                                             modifier = Modifier.weight(1f),
                                         )
@@ -419,50 +308,6 @@ fun DualMeshApp(
     }
 }
 
-@Composable
-private fun OrbitalMark() {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .background(
-                brush = Brush.radialGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.95f),
-                        NeonBlue.copy(alpha = 0.75f),
-                        NeonBlue.copy(alpha = 0.08f),
-                    ),
-                ),
-                shape = CircleShape,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            Modifier
-                .size(10.dp)
-                .background(Color(0xFF071326), CircleShape),
-        )
-    }
-}
-
-@Composable
-private fun HeaderAction(
-    label: String,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        color = GlassSurface,
-        shape = CircleShape,
-        border = BorderStroke(1.dp, GlassOutline),
-    ) {
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = NeonBlue,
-        )
-    }
-}
 
 @Composable
 private fun FocusedNetworkSelector(
@@ -746,8 +591,6 @@ private fun PacketLogRow(entry: PacketLogEntry) {
 @Composable
 private fun NetworkPane(
     network: MeshNetwork,
-    state: ConnectionState,
-    connectedDeviceName: String?,
     channels: List<RadioChannel>,
     selectedChannel: Int,
     capacity: Int,
@@ -759,7 +602,6 @@ private fun NetworkPane(
     deviceConnections: List<MultiDeviceBackend.DeviceConnection>,
     selectedDeviceId: String?,
     viewModel: MainViewModel,
-    requestPermissions: () -> Unit,
     showNetworkHeader: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
@@ -779,8 +621,6 @@ private fun NetworkPane(
         .associateBy(RadioContact::id)
         .values
         .sortedBy { it.name.lowercase() }
-    var showNodes by rememberSaveable(network, selectedDeviceId) { mutableStateOf(false) }
-    var showRadioSettings by rememberSaveable(network, selectedDeviceId) { mutableStateOf(false) }
     val conversationId = selectedConversationIds[network] ?: "channel:$selectedChannel"
     val conversationName = manager.conversationName(network, conversationId)
     val conversationMessages = messages.filter {
@@ -795,55 +635,20 @@ private fun NetworkPane(
             .padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
         if (showNetworkHeader) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusDot(state)
-                Text(
-                    network.label,
-                    modifier = Modifier.padding(start = 8.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = networkAccent(network),
-                )
-                Spacer(Modifier.weight(1f))
-                if (packetLogging) {
-                    Text(
-                        "REC",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = SignalRed,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(selectedDeviceState)
+                Text(network.label, Modifier.padding(start = 8.dp).weight(1f), style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, color = networkAccent(network))
+                if (packetLogging) Text("REC", style = MaterialTheme.typography.labelSmall, color = SignalRed, fontWeight = FontWeight.Bold)
             }
         }
-        ConnectionPanel(network, state, connectedDeviceName, manager, requestPermissions, onDisconnect = { viewModel.disconnect(network) })
-        if (deviceConnections.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                DeviceSelector(
-                    connections = deviceConnections,
-                    selectedDeviceId = selectedDeviceId,
-                    onSelect = viewModel::selectDevice,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    enabled = selectedDeviceState == ConnectionState.CONNECTED,
-                    onClick = { showRadioSettings = true },
-                ) { Text("Settings") }
-                NodeMapButton(
-                    nodeCount = nodes.size,
-                    positionedCount = nodes.count { it.hasValidMapPosition() },
-                    onClick = { showNodes = true },
-                )
-            }
-        }
+        Text(
+            selectedDeviceConnection?.let { "${it.profile.name} · ${selectedDeviceState.label()}" }
+                ?: "Choose a ${network.label} radio in Connections",
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
         ConversationSelector(
             network = network,
             channels = channels,
@@ -872,23 +677,6 @@ private fun NetworkPane(
             onSend = { text -> manager.send(network, conversationId, text) },
         )
     }
-    if (showNodes) {
-        MeshMapDialog(manager = manager, onDismiss = { showNodes = false })
-    }
-    if (showRadioSettings && selectedDeviceId != null) {
-        val access = when (network) {
-            MeshNetwork.MESHCORE -> manager.meshCore.settingsFor(selectedDeviceId)
-            MeshNetwork.MESHTASTIC -> manager.meshtastic.settingsFor(selectedDeviceId)
-        }
-        if (access != null) {
-            RadioSettingsDialog(
-                access = access,
-                radioName = selectedDeviceConnection?.profile?.name ?: network.label,
-                connected = selectedDeviceState == ConnectionState.CONNECTED,
-                onDismiss = { showRadioSettings = false },
-            )
-        }
-    }
 }
 
 @Composable
@@ -910,128 +698,6 @@ private fun StatusDot(state: ConnectionState) {
                 .size(7.dp)
                 .background(color, CircleShape),
         )
-    }
-}
-
-@Composable
-private fun ConnectionPanel(
-    network: MeshNetwork,
-    state: ConnectionState,
-    connectedDeviceName: String?,
-    manager: io.dualmesh.app.DualMeshManager,
-    requestScan: () -> Unit,
-    onDisconnect: () -> Unit,
-) {
-    var expanded by rememberSaveable(network) { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = GlassSurface), shape = RoundedCornerShape(24.dp), border = BorderStroke(1.dp, GlassOutline)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            StatusDot(state)
-            Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text(connectedDeviceName ?: "${network.label} connection", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                Text(state.label(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            TextButton(onClick = { expanded = true }) { Text("Manage") }
-            if (state == ConnectionState.CONNECTED) TextButton(onClick = onDisconnect) { Text("Disconnect") }
-        }
-    }
-    if (expanded) RadioConnectionsDialog(manager, initialNetwork = network, requestScan = requestScan, onDismiss = { expanded = false })
-}
-
-@Composable
-private fun DeviceSelector(
-    connections: List<MultiDeviceBackend.DeviceConnection>,
-    selectedDeviceId: String?,
-    onSelect: (ConnectionProfileStore.Profile) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val selected = connections.firstOrNull {
-        MultiDeviceBackend.targetId(it.profile) == selectedDeviceId
-    } ?: connections.first()
-    Box(modifier) {
-        Surface(
-            onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            color = GlassSurface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            border = BorderStroke(1.dp, GlassOutline),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusDot(selected.state)
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    "Radio · ${selected.profile.name}",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = NeonBlue,
-                )
-                Text(
-                    "▾",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            connections.forEach { connection ->
-                DropdownMenuItem(
-                    text = {
-                        Column {
-                            Text(connection.profile.name)
-                            Text(
-                                "${connection.profile.transport.name} · " +
-                                    connection.state.label(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    leadingIcon = { StatusDot(connection.state) },
-                    onClick = {
-                        onSelect(connection.profile)
-                        expanded = false
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun NodeMapButton(
-    nodeCount: Int,
-    positionedCount: Int,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
-        color = GlassSurface,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, NeonBlue.copy(alpha = 0.55f)),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                "Nodes / Map",
-                style = MaterialTheme.typography.labelLarge,
-                color = NeonBlue,
-            )
-            Text(
-                "$nodeCount saved · $positionedCount mapped",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 
@@ -1288,7 +954,7 @@ private fun ConversationSelector(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
     ) {
       Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Choose conversation") { expanded = true }.padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Column(Modifier.weight(1f)) {
@@ -1298,20 +964,16 @@ private fun ConversationSelector(
                     ?: selectedConversationId.substringAfter(':').take(16),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
             Text(
-                "${network.label} · ${channels.size}/$capacity channels · ${contacts.size} contacts",
+                "${channels.size}/$capacity channels · ${contacts.size} contacts",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Box {
-            OutlinedButton(
-                onClick = { expanded = true },
-                contentPadding = PaddingValues(horizontal = 14.dp),
-            ) {
-                Text("Conversations")
-            }
+            Text("▾", Modifier.padding(12.dp), style = MaterialTheme.typography.titleMedium, color = NeonBlue)
             DropdownMenu(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
@@ -1462,8 +1124,11 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     val threadItems = remember(messages) { collapseMessageReactions(messages) }
-    LaunchedEffect(threadItems.lastOrNull()?.message?.id) {
-        if (threadItems.isNotEmpty()) listState.scrollToItem(threadItems.lastIndex)
+    LaunchedEffect(threadItems.lastOrNull()?.message?.id, threadItems.lastOrNull()?.reactions?.size) {
+        if (threadItems.isNotEmpty()) {
+            listState.scrollToItem(threadItems.lastIndex)
+            listState.scrollBy(listState.layoutInfo.viewportSize.height.toFloat())
+        }
     }
 
     if (threadItems.isEmpty()) {

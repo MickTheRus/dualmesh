@@ -30,7 +30,7 @@ internal fun NodeDetailContent(
         NodeDetailSection("Last heard") {
             DetailValue("Seen", nodeLastSeenLabel(node).removePrefix("Last heard "))
             DetailValue("Time", node.lastHeardMillis.takeIf { it > 0 }?.let(::nodeTimestamp) ?: "Unknown")
-            node.hopsAway?.let { DetailValue("Distance", if (it == 0) "Direct" else "$it hops") }
+            node.hopsAway?.let { DetailValue("Distance", if (it == 0) "Direct" else if (it == 1) "1 hop" else "$it hops") }
             node.snr?.let { DetailValue("SNR", "%.1f dB".format(it)) }
             node.rssi?.let { DetailValue("RSSI", "$it dBm") }
         }

@@ -9,7 +9,7 @@ DualMesh supplies these Android Auto functions:
 The dashboard uses AndroidX Car App Library `1.7.0`. It needs Car API level 7 or a newer level.
 DualMesh does not support Apple CarPlay.
 
-The phone **View** setting does not change Android Auto. Android Auto uses its own conversation
+The phone **Settings > Phone layout** setting does not change Android Auto. Android Auto uses its own conversation
 list and map.
 
 ## Message dashboard
