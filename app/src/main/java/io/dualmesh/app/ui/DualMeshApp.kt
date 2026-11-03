@@ -166,7 +166,7 @@ fun DualMeshApp(
                         }
                     },
                     actions = {
-                        HeaderAction("Map") { showMap = true }
+                        HeaderAction("Nodes") { showMap = true }
                         Box {
                             HeaderAction("View") { showViewMenu = true }
                             DropdownMenu(

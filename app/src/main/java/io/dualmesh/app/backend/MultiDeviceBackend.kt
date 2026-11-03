@@ -149,6 +149,8 @@ class MultiDeviceBackend(
     fun isActive(profile: ConnectionProfileStore.Profile): Boolean =
         targetId(profile) in slots
 
+    fun nodeActionsFor(deviceId: String): io.dualmesh.app.nodes.NodeActions? = slots[deviceId]?.backend?.nodeActions
+
     fun settingsFor(deviceId: String): io.dualmesh.app.settings.RadioSettingsAccess? =
         slots[deviceId]?.backend?.settingsAccess
 

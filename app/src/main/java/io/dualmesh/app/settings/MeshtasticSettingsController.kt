@@ -22,6 +22,8 @@ internal class MeshtasticSettingsController(
     private var needsRefresh = true
     private var packetId = 0
 
+    fun ownerUser(): User? = records["owner"] as? User
+
     fun reset() {
         queue.cancel("The radio disconnected before the settings operation was verified.")
         passkey = ByteString.EMPTY

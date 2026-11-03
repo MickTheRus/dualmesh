@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.content.Context
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -43,9 +44,11 @@ import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 
+private data class NodeActionTarget(val network: MeshNetwork, val deviceId: String, val radioName: String, val nodeId: String? = null)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
+internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean = true, onDismiss: () -> Unit) {
     val nodes by manager.nodes.collectAsStateWithLifecycle()
     val mcConnections by manager.meshCore.deviceConnections.collectAsStateWithLifecycle()
     val mtConnections by manager.meshtastic.deviceConnections.collectAsStateWithLifecycle()
@@ -55,7 +58,12 @@ internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
     var filters by remember { mutableStateOf(preferences.load()) }
     var query by rememberSaveable { mutableStateOf("") }
     var showFilters by rememberSaveable { mutableStateOf(false) }
-    var showDirectory by rememberSaveable { mutableStateOf(false) }
+    var showDirectory by rememberSaveable { mutableStateOf(initialDirectory) }
+    val listState = rememberLazyListState()
+    var sort by rememberSaveable { mutableStateOf(NodeSort.LAST_HEARD) }
+    var sortMenu by remember { mutableStateOf(false) }
+    var radioMenu by remember { mutableStateOf(false) }
+    var actionTarget by remember { mutableStateOf<NodeActionTarget?>(null) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var fitRequest by remember { mutableIntStateOf(0) }
     var traceError by remember { mutableStateOf<String?>(null) }
@@ -67,6 +75,7 @@ internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
         }
     }
     val visible = remember(nodes, filters, query, now) { filterMapNodes(nodes, filters, query, now) }
+    val sortedNodes = remember(visible, sort) { sortNodeList(visible, sort) }
     val positioned = remember(visible) { visible.filter { it.hasValidMapPosition() } }
     val selected = visible.firstOrNull { mapNodeKey(it) == selectedKey }
     val connections = mcConnections + mtConnections
@@ -108,13 +117,14 @@ internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
         }
     }
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (selected != null) selectedKey = null else onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        MaterialTheme(typography = Typography()) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().safeDrawingPadding()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Mesh map", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(if (showDirectory) "Nodes (${visible.size})" else "Mesh map", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     TextButton(onClick = { showFilters = true }) { Text("Filters") }
                     TextButton(onClick = onDismiss) { Text("Close") }
                 }
@@ -138,6 +148,45 @@ internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
                     FilterChip(selected = filters.meshCore, onClick = { update(filters.copy(meshCore = !filters.meshCore)) }, label = { Text("MC · MeshCore") })
                     FilterChip(selected = filters.meshtastic, onClick = { update(filters.copy(meshtastic = !filters.meshtastic)) }, label = { Text("MT · Meshtastic") })
                 }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { showDirectory = true; selectedKey = null }, enabled = !showDirectory) { Text("Nodes") }
+                    TextButton(onClick = { showDirectory = false; selectedKey = null }, enabled = showDirectory) { Text("Map") }
+                    Spacer(Modifier.weight(1f))
+                    if (showDirectory) Box {
+                        TextButton(onClick = { sortMenu = true }) { Text("Sort") }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                            NodeSort.entries.forEach { value -> DropdownMenuItem(text = { Text(if (sort == value) "✓ ${value.label}" else value.label) }, onClick = { sort = value; sortMenu = false }) }
+                        }
+                    }
+                    Box {
+                        TextButton(onClick = { radioMenu = true }) { Text("Radio actions") }
+                        DropdownMenu(expanded = radioMenu, onDismissRequest = { radioMenu = false }) {
+                            if (connections.isEmpty()) DropdownMenuItem(text = { Text("Connect a radio first") }, onClick = {}, enabled = false)
+                            connections.forEach { connection ->
+                                DropdownMenuItem(text = { Text("${connection.profile.network.label} · ${connection.profile.name}") },
+                                    enabled = connection.state == ConnectionState.CONNECTED,
+                                    onClick = {
+                                        radioMenu = false
+                                        actionTarget = NodeActionTarget(connection.profile.network, MultiDeviceBackend.targetId(connection.profile), connection.profile.name)
+                                    })
+                            }
+                        }
+                    }
+                }
+                if (showDirectory) {
+                    LazyColumn(Modifier.fillMaxWidth().weight(1f), state = listState) {
+                        items(sortedNodes, key = ::mapNodeKey) { node ->
+                            CompactNodeRow(node) { selectedKey = mapNodeKey(node); traceError = null }
+                            HorizontalDivider(Modifier.padding(start = 72.dp), thickness = 0.5.dp)
+                        }
+                        if (visible.isEmpty()) item {
+                            Column(Modifier.padding(24.dp)) {
+                                Text("No nodes match these filters.")
+                                TextButton(onClick = { query = ""; update(NodeMapFilters()) }) { Text("Reset filters") }
+                            }
+                        }
+                    }
+                } else {
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     MeshNodeMap(
                         nodes = positioned, labels = filters.showLabels, darkTiles = filters.darkTiles,
@@ -171,7 +220,8 @@ internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
                         }
                     }
                 }
-                if (selected != null) {
+                }
+                if (selected != null && !showDirectory) {
                     Column(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()).padding(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Selected node", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
@@ -190,7 +240,7 @@ internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
             ) {
                 Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Filter map", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        Text("Filter nodes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                         TextButton(onClick = { update(NodeMapFilters()); query = "" }) { Text("Reset") }
                         TextButton(onClick = { showFilters = false }) { Text("Done") }
                     }
@@ -235,29 +285,33 @@ internal fun MeshMapDialog(manager: DualMeshManager, onDismiss: () -> Unit) {
                 }
             }
         }
-        if (showDirectory) {
-            ModalBottomSheet(
-                onDismissRequest = { showDirectory = false },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            ) {
-                Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(horizontal = 16.dp).navigationBarsPadding()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Nodes (${visible.size})", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                        TextButton(onClick = { showDirectory = false }) { Text("Done") }
-                    }
-                    traceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(visible, key = ::mapNodeKey) { node ->
-                            Column {
-                                NodeDetails(node)
-                                if (node.hasValidMapPosition()) TextButton(onClick = { selectedKey = mapNodeKey(node); showDirectory = false }) { Text("Show on map") }
-                            }
+        if (selected != null && showDirectory) {
+            Dialog(onDismissRequest = { selectedKey = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { selectedKey = null }) { Text("‹ Back") }
+                            Text("Node details", style = MaterialTheme.typography.titleLarge)
                         }
-                        if (visible.isEmpty()) item { Text("No nodes match these filters.", Modifier.padding(20.dp)) }
+                        NodeDetails(selected)
+                        traceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        if (selected.network == MeshNetwork.MESHTASTIC) TextButton(
+                            enabled = connections.any { MultiDeviceBackend.targetId(it.profile) == selected.deviceId && it.state == ConnectionState.CONNECTED },
+                            onClick = { actionTarget = NodeActionTarget(selected.network, selected.deviceId, selected.deviceName, selected.id) },
+                        ) { Text("Request node stats") }
+                        if (selected.hasValidMapPosition()) TextButton(onClick = { showDirectory = false }) { Text("Show on map") }
                     }
                 }
             }
         }
+        actionTarget?.let { target ->
+            val backend = if (target.network == MeshNetwork.MESHCORE) manager.meshCore else manager.meshtastic
+            val access = backend.nodeActionsFor(target.deviceId)
+            if (access != null) NodeActionsDialog(access, target.network, target.radioName, target.nodeId, onDismiss = { actionTarget = null })
+            else AlertDialog(onDismissRequest = { actionTarget = null }, text = { Text("This radio is no longer connected") }, confirmButton = { TextButton(onClick = { actionTarget = null }) { Text("Done") } })
+        }
+        }
+
     }
 }
 

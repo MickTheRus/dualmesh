@@ -1,12 +1,15 @@
 # Nodes, contacts, and maps
 
-## Shared phone and tablet map
+## Node list and shared map
 
-Open **Map** in the app header or **Nodes / Map** in a network pane. The map includes saved nodes
-from both technologies and all radios. **Both**, **MC**, and **MT** select which networks appear.
+Open **Nodes** in the app header or **Nodes / Map** in a network pane. The compact list includes
+saved nodes from both technologies and all radios. Each row shows its short-name badge, name,
+source radio, role, last heard, and available hop/SNR data. **Sort** orders by last heard, name,
+hops, or signal; unknown hop/signal values sort last. Tap a row for node details and trace history.
+Back returns to the list with its scroll position preserved. Select **Map** to show positions. **Both**, **MC**, and **MT** select which networks appear.
 MC markers are purple; MT markers are green. Tap a marker for its details and traceroute action.
 **Fit nodes** frames the current results; incoming updates preserve the camera you chose.
-**Nodes** opens the same filtered directory, including nodes without valid positions. **Show on
+**Nodes** returns to the same filtered list, including nodes without valid positions. **Show on
 map** centers a positioned node. Traces always use that node's network and source radio.
 
 **Filters** contains Include unknown, Exclude MQTT, Only show direct nodes, Hide offline nodes,
@@ -24,6 +27,40 @@ but their nodes remain searchable in the directory.
 
 DualMesh keeps a separate node directory for each radio. This separation is necessary when radios
 use different frequencies, presets, regions, or channels.
+
+## Statistics and advertisements
+
+Open **Radio actions** and choose the connected source radio. **Request stats** performs an
+explicit read; opening the screen does not issue requests or transmit advertisements. Results
+stay in memory for the connection and show the target and read time. Closing the dialog does
+not cancel an outstanding request. Reconnecting clears the result.
+
+- **MeshCore:** reads core (battery, uptime, errors, queue), radio (noise, RSSI/SNR, airtime), and
+  packet counters. Requires companion protocol 8 or newer; unsupported reads and timeouts are
+  reported. These are local companion statistics, not remote repeater administration.
+- **Meshtastic:** requests device telemetry and local statistics from the companion radio.
+  On a Meshtastic node's detail screen, **Request node stats** requests that node's device
+  telemetry using its source radio and channel. Remote requests use RF and may time out when
+  a node is unavailable or firmware restricts telemetry. Responses must match the source and
+  request ID; routing failures are reported. Missing optional metrics are omitted. Some firmware
+  returns device telemetry but does not answer local-statistics queries; available device metrics
+  remain visible with an explanation of the missing response.
+
+**Zero-hop** and **Flood** advertise the selected radio. MeshCore uses `CMD_SEND_SELF_ADVERT`
+with the zero-hop/flood flag and waits for the firmware acknowledgement. The radio retains its
+configured location policy and flood scope. Meshtastic broadcasts the radio's own `NODEINFO_APP`
+user record on the selected channel, with hop limit zero or the configured LoRa hop limit.
+It requests neither acknowledgements nor responses, preserving zero-hop behavior. The UI
+reports that the packet was queued; reception by other nodes is not guaranteed. Meshtastic
+node-info broadcasts are an equivalent announcement, not the MeshCore advert format.
+
+Settings and node actions are serialized on each radio. On MeshCore, message and trace sends
+also wait while a node action is active because generic replies have no request IDs. No stats
+are posted into chat and there are no automatic or repeating advertisements.
+
+Protocol references: [MeshCore companion firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp),
+[Meshtastic telemetry](https://github.com/meshtastic/firmware/blob/master/src/modules/Telemetry/DeviceTelemetry.cpp),
+and [Meshtastic zero-hop routing](https://github.com/meshtastic/firmware/blob/master/src/mesh/Router.cpp).
 
 ## Node identity
 
@@ -126,8 +163,7 @@ app does not include offline map files.
 ## Traceroute
 
 Traceroute uses the source radio shown on the node row. It does not use another
-connected radio, even when that radio can see the same node. Select **Nodes / Map**, then select
-**Trace** on a node.
+connected radio, even when that radio can see the same node. Select **Nodes**, open a node, then select **Trace**.
 
 The node row shows the request state, the route toward the destination, the return route when the
 protocol supplies one, and the SNR for each available link. A request times out after 60 seconds.

@@ -33,6 +33,10 @@ The tests examine these functions:
 - Local MQTT broker publishing, downlink, reconnect, session isolation, and teardown.
 - Local radio settings commands and readback for both technologies, admin response matching,
   session keys, validation, negative ACKs, timeouts, and preserving unedited/unknown fields.
+- Node actions: serialized MeshCore stats and advert ACKs, legacy/unsigned counters, signed
+  radio metrics, Meshtastic local/remote telemetry correlation, routing failures, timeout/reset,
+  and exact zero-hop/flood packets without broadcast ACKs or reply requests.
+- Node list sorting with missing hop and signal values.
 - Map filters across both technologies and source radios, unknown-name rules, MQTT and direct
   filters, last-heard boundaries, infrastructure roles, and coordinate validity.
 - Connection-profile storage.

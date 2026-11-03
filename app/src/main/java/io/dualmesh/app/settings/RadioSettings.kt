@@ -48,7 +48,11 @@ internal sealed interface SettingsReply {
 }
 
 /** Serial requests with one timeout and one response matcher per command. */
-internal class RadioCommandQueue<T>(private val scheduler: SettingsScheduler) {
+internal class RadioCommandQueue<T>(
+    private val scheduler: SettingsScheduler,
+    private val timeoutMillis: Long = 8_000,
+    private val timeoutMessage: String = "Radio did not answer. Refresh settings before retrying; a write may have applied.",
+) {
     class Step<T>(
         val send: () -> Boolean,
         val accept: (T) -> SettingsReply,
@@ -94,10 +98,10 @@ internal class RadioCommandQueue<T>(private val scheduler: SettingsScheduler) {
     private fun advance() {
         val step = steps.firstOrNull() ?: return finish(null)
         val version = ++generation
-        cancelTimeout = scheduler.after(8_000) {
+        cancelTimeout = scheduler.after(timeoutMillis) {
             if (version == generation) {
                 if (step.optional) { steps.removeFirst(); advance() }
-                else finish("Radio did not answer. Refresh settings before retrying; a write may have applied.")
+                else finish(timeoutMessage)
             }
         }
         runCatching { step.send() }

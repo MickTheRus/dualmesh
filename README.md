@@ -37,10 +37,10 @@ The screenshots contain test data. They do not contain data from a real deployme
 6. If you do not enter a port, the app uses port `4403`.
 7. Select a radio.
 8. Select one of its channels or direct-message conversations.
-9. Select **Map** or **Nodes / Map** to open the shared map and node directory.
+9. Select **Nodes** or **Nodes / Map** to open the compact node list, then **Map** for positions.
 10. Search by node name, ID, role, hardware, channel, or radio name. Use MC/MT chips and
     **Filters** to select networks, radios, node roles, and last-heard limits.
-11. Select **Trace** next to a node to test its available mesh route.
+11. Open a node for details and **Trace**, or use **Radio actions** to request stats and advertise.
 
 Enable **Packets** only when you must record protocol traffic.
 
@@ -64,6 +64,18 @@ Broker credentials stay in memory for the connection. The radio controls encrypt
 downlink, and map reporting; these can be edited under the radio's **Settings**.
 The proxy does not queue traffic while the broker is offline, and it drops oversized packets
 or excess downlink traffic when the radio transport is busy.
+
+### Node statistics and announcements
+
+Open **Nodes > Radio actions** and choose a connected radio. **Request stats** reads MeshCore
+battery, uptime, radio, and packet statistics, or Meshtastic device telemetry and local stats.
+Meshtastic node details also offer a remote **Request node stats** action. Results stay in memory
+until disconnect and are never posted into chat.
+
+**Zero-hop** and **Flood** send a MeshCore advert, or the equivalent Meshtastic user-info
+broadcast with zero or configured hops. Actions use the radio you choose. Opening the node
+list sends nothing automatically. See [nodes and maps](docs/NODES_AND_MAPS.md) for protocol
+support and response behavior.
 
 ### Radio settings
 

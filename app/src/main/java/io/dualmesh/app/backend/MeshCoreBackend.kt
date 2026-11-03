@@ -68,7 +68,7 @@ class MeshCoreBackend(
 
     private val session = GattSession(context, BleRadioScanner.MESHCORE_SERVICE, this)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val settingsController = MeshCoreSettingsController(
+    private val settingsController: MeshCoreSettingsController = MeshCoreSettingsController(
         send = { frame ->
             if (_connectionState.value != ConnectionState.CONNECTED) false else {
                 writeFrame(frame, "Radio settings command ${frame[0].toInt() and 255}")
@@ -77,7 +77,7 @@ class MeshCoreBackend(
         },
         ready = {
             _connectionState.value == ConnectionState.CONNECTED && !waitingForDeviceInfo &&
-                channelScanIndex == null && !waitingForContacts && !waitingForSetTime && pendingTraces.isEmpty()
+                channelScanIndex == null && !waitingForContacts && !waitingForSetTime && pendingTraces.isEmpty() && !nodeActionsController.busy
         },
         channelCapacity = { _channelCapacity.value },
         scheduler = SettingsScheduler { delay, action ->
@@ -94,6 +94,25 @@ class MeshCoreBackend(
             }
         },
     )
+    private val nodeActionsController: io.dualmesh.app.nodes.MeshCoreNodeActions = io.dualmesh.app.nodes.MeshCoreNodeActions(
+        send = { frame ->
+            if (_connectionState.value != ConnectionState.CONNECTED) false else {
+                writeFrame(frame, "Node action command ${frame[0].toInt() and 255}")
+                true
+            }
+        },
+        ready = {
+            _connectionState.value == ConnectionState.CONNECTED && !waitingForDeviceInfo &&
+                channelScanIndex == null && !waitingForContacts && !waitingForSetTime &&
+                pendingTraces.isEmpty() && !settingsController.busy
+        },
+        scheduler = SettingsScheduler { delay, action ->
+            val callback = Runnable(action)
+            mainHandler.postDelayed(callback, delay)
+            ({ mainHandler.removeCallbacks(callback) })
+        },
+    )
+    override val nodeActions: io.dualmesh.app.nodes.NodeActions get() = nodeActionsController
     override val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess get() = settingsController
     private val handshakeTimeout = Runnable {
         if (_connectionState.value == ConnectionState.CONNECTING) {
@@ -128,6 +147,7 @@ class MeshCoreBackend(
     )
 
     override fun connect(address: String, name: String) {
+        nodeActionsController.reset()
         settingsController.reset()
         clearStartupCallbacks()
         failPendingTraces("A new MeshCore connection started.")
@@ -147,6 +167,7 @@ class MeshCoreBackend(
     }
 
     override fun disconnect() {
+        nodeActionsController.reset()
         settingsController.reset()
         clearHandshakeTimeout()
         clearStartupCallbacks()
@@ -163,7 +184,7 @@ class MeshCoreBackend(
     }
 
     override fun sendChannelMessage(text: String, channel: Int): Result<Unit> {
-        if (settingsController.busy) return Result.failure(IllegalStateException("Wait for radio settings to finish"))
+        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -199,7 +220,7 @@ class MeshCoreBackend(
     }
 
     override fun sendDirectMessage(text: String, contactId: String): Result<Unit> {
-        if (settingsController.busy) return Result.failure(IllegalStateException("Wait for radio settings to finish"))
+        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -236,7 +257,7 @@ class MeshCoreBackend(
     }
 
     override fun traceRoute(contactId: String): Result<Unit> {
-        if (settingsController.busy) return Result.failure(IllegalStateException("Wait for radio settings to finish"))
+        if (settingsController.busy || nodeActionsController.busy) return Result.failure(IllegalStateException("Wait for the current radio operation to finish"))
         if (_connectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(IllegalStateException("MeshCore radio is not ready"))
         }
@@ -301,6 +322,7 @@ class MeshCoreBackend(
 
     override fun onDisconnected() {
         if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onDisconnected() }; return }
+        nodeActionsController.reset()
         settingsController.reset()
         clearHandshakeTimeout()
         clearStartupCallbacks()
@@ -310,6 +332,7 @@ class MeshCoreBackend(
 
     override fun onError(message: String) {
         if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onError(message) }; return }
+        nodeActionsController.reset()
         settingsController.reset()
         clearHandshakeTimeout()
         clearStartupCallbacks()
@@ -327,6 +350,7 @@ class MeshCoreBackend(
             payload = value,
             summary = describeIncomingFrame(value),
         )
+        if (nodeActionsController.receive(value)) return
         if (settingsController.receive(value)) return
         settingsController.observe(value)
         if ((value[0].toInt() and 0xff) == RESPONSE_SELF_INFO) {
