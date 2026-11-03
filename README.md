@@ -10,8 +10,8 @@ other mesh.
 
 ## Android download
 
-[Download DualMesh 0.2.0](https://github.com/MickTheRus/dualmesh/releases/tag/v0.2.0)
-from this fork's releases. The installable APK requires Android 8.0 or newer and uses a dedicated
+[Download DualMesh 0.2.0](https://github.com/logans-stuff/dualmesh/releases/tag/v0.2.0)
+from the upstream project's releases. The installable APK requires Android 8.0 or newer and uses a dedicated
 production signing certificate. Its SHA-256 checksum and public certificate are included.
 
 The production certificate differs from 0.1.0 and debug builds. Switching to 0.2.0 requires
