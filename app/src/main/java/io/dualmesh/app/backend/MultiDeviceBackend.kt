@@ -41,6 +41,7 @@ class MultiDeviceBackend(
         val channels: List<RadioChannel>,
         val contacts: List<RadioContact>,
         val nodes: List<MeshNode>,
+        val mqttProxyStatus: String? = null,
     )
 
     private data class Slot(
@@ -148,6 +149,9 @@ class MultiDeviceBackend(
     fun isActive(profile: ConnectionProfileStore.Profile): Boolean =
         targetId(profile) in slots
 
+    fun settingsFor(deviceId: String): io.dualmesh.app.settings.RadioSettingsAccess? =
+        slots[deviceId]?.backend?.settingsAccess
+
     override fun connect(address: String, name: String) {
         add(
             ConnectionProfileStore.Profile(
@@ -212,6 +216,11 @@ class MultiDeviceBackend(
     }
 
     private fun observe(id: String, slot: Slot) {
+        (slot.backend as? MeshtasticBackend)?.let { backend ->
+            slot.observers += backend.mqttProxyStatus
+                .onEach { refreshAggregate() }
+                .launchIn(scope)
+        }
         slot.observers += slot.backend.incomingMessages
             .onEach { message ->
                 _incomingMessages.emit(
@@ -321,6 +330,7 @@ class MultiDeviceBackend(
             DeviceConnection(
                 profile = slot.profile,
                 state = slot.backend.connectionState.value,
+                mqttProxyStatus = (slot.backend as? MeshtasticBackend)?.mqttProxyStatus?.value,
                 isOutbound = id == outboundId,
                 channels = slot.backend.channels.value,
                 contacts = slot.backend.contacts.value,

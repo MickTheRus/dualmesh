@@ -11,6 +11,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.atomic.AtomicInteger
 
 class MeshtasticTcpSession(
     private val listener: Listener,
@@ -24,6 +25,7 @@ class MeshtasticTcpSession(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeLock = Any()
+    private val pendingWrites = AtomicInteger()
     private var connectionJob: Job? = null
     @Volatile private var socket: Socket? = null
     @Volatile private var generation = 0L
@@ -83,10 +85,14 @@ class MeshtasticTcpSession(
         }
     }
 
-    fun send(payload: ByteArray): Boolean {
+    fun send(payload: ByteArray, bounded: Boolean = false): Boolean {
         val activeSocket = socket?.takeIf { it.isConnected && !it.isClosed } ?: return false
         val sendGeneration = generation
         val frame = runCatching { MeshtasticStreamCodec.frame(payload) }.getOrNull() ?: return false
+        if (pendingWrites.incrementAndGet() > 32 && bounded) {
+            pendingWrites.decrementAndGet()
+            return false
+        }
         scope.launch {
             runCatching {
                 synchronized(writeLock) {
@@ -101,7 +107,7 @@ class MeshtasticTcpSession(
                     disconnect()
                 }
             }
-        }
+        }.invokeOnCompletion { pendingWrites.decrementAndGet() }
         return true
     }
 

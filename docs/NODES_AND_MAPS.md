@@ -1,5 +1,27 @@
 # Nodes, contacts, and maps
 
+## Shared phone and tablet map
+
+Open **Map** in the app header or **Nodes / Map** in a network pane. The map includes saved nodes
+from both technologies and all radios. **Both**, **MC**, and **MT** select which networks appear.
+MC markers are purple; MT markers are green. Tap a marker for its details and traceroute action.
+**Fit nodes** frames the current results; incoming updates preserve the camera you chose.
+**Nodes** opens the same filtered directory, including nodes without valid positions. **Show on
+map** centers a positioned node. Traces always use that node's network and source radio.
+
+**Filters** contains Include unknown, Exclude MQTT, Only show direct nodes, Hide offline nodes,
+Hide unheard nodes, Exclude infrastructure, last-heard windows, individual roles, and radio
+selection. It also controls node labels and dark street tiles. Filters persist across app
+restarts and apply to both the directory and markers. Search uses the same filters.
+
+An unknown MT node has no short name; an unknown MC node has no advertised name. Direct requires
+a measured zero-hop route over RF; missing hop data is not treated as direct. MeshCore adverts
+currently do not supply measured hop counts, so Only show direct nodes hides those records.
+Offline means no last-heard update within two hours. Nodes without a recorded last-heard time
+are hidden by both offline and explicit last-heard limits. Infrastructure includes routers,
+repeaters, and room servers. Invalid coordinates and the (0, 0) placeholder stay off the map,
+but their nodes remain searchable in the directory.
+
 DualMesh keeps a separate node directory for each radio. This separation is necessary when radios
 use different frequencies, presets, regions, or channels.
 
@@ -82,12 +104,12 @@ Select **Nodes / Map** in a network pane.
 
 The panel shows:
 
-- the selected radio name
+- the source radio name for each node
 - the total node count
 - the count of nodes with positions
 - a MapLibre and OpenStreetMap map
 - one marker for each positioned node
-- a search field for the selected radio
+- a search field across the enabled networks and radios
 - node identity and radio data
 - a **Trace** control for each available remote node.
 
@@ -95,15 +117,15 @@ Search by node name, short name, ID, public key, role, hardware, hop count, or s
 `channel 2` or `ch 2` to find nodes on a channel. The result count changes as you type. The
 **Trace** control stays next to each result.
 
-Phones can use the Focused or Stacked layout. Tablets show both network panes. The map always uses
-the radio that is selected in its network pane.
+Phones can use the Focused or Stacked layout. Tablets show both network panes. The shared map
+uses its own network and radio filters independently of the radio selected for sending messages.
 
 Map tiles require an Internet connection. The saved node rows and coordinates work offline. The
 app does not include offline map files.
 
 ## Traceroute
 
-Traceroute uses the radio selected in the applicable network pane. It does not use another
+Traceroute uses the source radio shown on the node row. It does not use another
 connected radio, even when that radio can see the same node. Select **Nodes / Map**, then select
 **Trace** on a node.
 

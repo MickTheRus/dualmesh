@@ -215,6 +215,14 @@ class GattSession(
         enqueue(Operation.Write(characteristic, value.copyOf()))
     }
 
+    /** Bound broker downlink traffic so it cannot grow the radio operation queue indefinitely. */
+    fun tryWrite(characteristic: UUID, value: ByteArray): Boolean = synchronized(operations) {
+        if (!configured || operations.size >= 32) return@synchronized false
+        operations.addLast(Operation.Write(characteristic, value.copyOf()))
+        runNextLocked()
+        true
+    }
+
     fun read(characteristic: UUID) {
         enqueue(Operation.Read(characteristic))
     }

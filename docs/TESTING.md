@@ -28,6 +28,13 @@ The tests examine these functions:
 - Meshtastic frame recovery after invalid data.
 - Meshtastic TCP endpoint parsing.
 - A local TCP socket in both directions.
+- MQTT broker defaults, TLS and endpoint parsing, and per-channel downlink subscriptions.
+- MQTT binary/JSON envelopes, retained flags, implicit ACKs, and radio API size limits.
+- Local MQTT broker publishing, downlink, reconnect, session isolation, and teardown.
+- Local radio settings commands and readback for both technologies, admin response matching,
+  session keys, validation, negative ACKs, timeouts, and preserving unedited/unknown fields.
+- Map filters across both technologies and source radios, unknown-name rules, MQTT and direct
+  filters, last-heard boundaries, infrastructure roles, and coordinate validity.
 - Connection-profile storage.
 - Meshtastic reaction detection.
 - Meshtastic reaction attachment and duplicate removal.
@@ -139,8 +146,8 @@ Do not use repeated traceroutes as a load test on a shared mesh.
 ## Node test
 
 1. Select **Nodes / Map** for each radio.
-2. Compare the node count with the selected radio.
-3. Compare the position count with the selected radio.
+2. Use **Filters > Radio** to compare the node count with one radio, then select **All radios**.
+3. Toggle MC and MT independently and compare the position count with the visible markers.
 4. Examine marker names, node IDs, hop data, SNR, and coordinates.
 5. Stop and restart the app.
 6. Make sure that saved nodes appear while the radios reconnect.

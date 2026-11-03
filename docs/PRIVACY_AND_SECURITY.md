@@ -10,6 +10,7 @@ private.
 | MeshCore BLE | Selected companion radio | Commands, messages, contacts, and adverts |
 | Meshtastic BLE | Selected Meshtastic radio | `ToRadio` and `FromRadio` API |
 | Meshtastic TCP | Endpoint that the user enters | TCP Stream API, usually port `4403` |
+| Meshtastic MQTT proxy | Broker configured on each radio | MQTT uplink and downlink over the phone's Internet connection |
 | Map tiles | OpenStreetMap servers | Map background |
 | Android Auto | Connected Android Auto host | Templates and map pixels |
 
@@ -22,7 +23,23 @@ the map if this data must stay private.
 The Meshtastic TCP connection does not add TLS. Use it on a trusted network or through a trusted
 VPN. Bluetooth protection depends on Android, the radio, and the radio settings.
 
+When a radio enables MQTT and its client proxy, DualMesh connects to that radio's configured
+broker automatically. The broker receives your public IP address, credentials, topics, and
+published payloads. Radio encryption and channel uplink/downlink settings still apply. Custom
+brokers use the radio's TLS setting or an explicit secure URI (`ssl://`, `mqtts://`, or `wss://`).
+TLS uses the system trust store and verifies the broker hostname. An empty broker address uses
+the Meshtastic public broker and its well-known credentials over TLS.
+
+MQTT credentials are held in connection memory. Optional packet captures include the radio's
+MQTT configuration and proxy envelopes, so captured bytes can contain broker passwords and
+message data even though packet summaries omit these values.
+
 ## Data on the phone
+
+The radio-settings editor keeps configuration records, credentials, session passkeys, and drafts
+in connection memory. It does not persist configuration drafts or reveal secrets by default.
+Settings apply only when **Save** is selected. Protocol logging, when enabled, can
+capture configuration and admin payloads including credentials and key material.
 
 DualMesh stores these items:
 

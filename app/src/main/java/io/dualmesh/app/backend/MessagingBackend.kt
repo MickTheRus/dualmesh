@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 interface MessagingBackend {
+    val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess? get() = null
     val network: MeshNetwork
     val maxMessageBytes: Int
     val connectionState: StateFlow<ConnectionState>
