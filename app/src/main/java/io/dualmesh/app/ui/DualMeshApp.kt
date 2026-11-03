@@ -1316,7 +1316,7 @@ internal fun NodeDirectoryRow(
 }
 
 @Composable
-private fun TraceRouteStatus(trace: TraceRouteResult) {
+internal fun TraceRouteStatus(trace: TraceRouteResult) {
     val color = when (trace.state) {
         TraceRouteState.PENDING -> WarningAmber
         TraceRouteState.COMPLETE -> SignalGreen

@@ -20,6 +20,17 @@ class NodeMapFiltersTest {
     private fun visible(nodes: List<MeshNode>, filters: NodeMapFilters = NodeMapFilters(), query: String = "") =
         filterMapNodes(nodes, filters, query, now)
 
+    @Test fun `favorites stay scoped to the source radio and network and respect other filters`() {
+        val duplicate = mt.copy(deviceId = "another-radio")
+        val keys = setOf(mapNodeKey(mt))
+        val nodes = listOf(mc, duplicate, mt)
+        assertEquals(listOf(mt), filterMapNodes(nodes, NodeMapFilters(onlyFavorites = true), "", now, keys))
+        assertTrue(filterMapNodes(nodes, NodeMapFilters(onlyFavorites = true, meshtastic = false), "", now, keys).isEmpty())
+        assertEquals(listOf(mt, mc, duplicate), sortNodeList(nodes, NodeSort.NAME, keys))
+        assertEquals(nodes, filterMapNodes(nodes, NodeMapFilters(), "", now, emptySet()))
+        assertTrue(filterMapNodes(nodes, NodeMapFilters(onlyFavorites = true), "", now, emptySet()).isEmpty())
+    }
+
     @Test fun `both networks are visible by default and can be selected independently`() {
         val nodes = listOf(mt, mc)
         assertEquals(nodes, visible(nodes))

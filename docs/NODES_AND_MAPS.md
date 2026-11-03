@@ -28,6 +28,54 @@ but their nodes remain searchable in the directory.
 DualMesh keeps a separate node directory for each radio. This separation is necessary when radios
 use different frequencies, presets, regions, or channels.
 
+## Favorites and node details
+
+Tap the star on a node row or detail screen to add/remove a favorite. Favorites appear first
+within the chosen sort order. **★ Favorites** limits both list and map results to favorites,
+while retaining network, radio, search and other filters. Favorites and the filter survive app
+restarts. They are private app preferences keyed by network, source radio and node ID; they do
+not change Meshtastic firmware favorites or MeshCore contact flags. Equal node IDs on two radios
+can be favorited independently.
+
+Node details use sections for **Last heard**, **Location**, **Source**, **Node info**, and
+**Traceroute**. Available timestamps, coordinates/precision, source radio, MQTT state, channel,
+role, hardware, public key, signal and trace history are shown. Missing fields remain unknown.
+IDs and values can be selected and copied. Opening details from the map returns to that map;
+opening from the list returns to the list with its position retained.
+
+## MeshCore contact routes
+
+Open a MeshCore node, then **Route > Set route** on its connected source radio. The editor reads
+only that contact when a cached route is unavailable; **Refresh** explicitly rereads it. It offers:
+
+- **Direct:** zero intermediate repeaters.
+- **Flood:** forget the stored path using `CMD_RESET_PATH`. A subsequent exchange can learn a new path.
+- **Manual:** paste ordered hex hop hashes, add known repeaters/rooms from the same radio, and
+  reorder/remove hops. Hops run from the companion toward the destination and exclude the
+  destination itself. Hash-prefix collisions are displayed rather than attributed to one node.
+- **Discover route:** send a path-discovery request, then review **Discovered route**. **Use
+  discovered route** stages it in the editor; **Save route** applies it.
+- **Recent routes:** stage one of the last ten distinct routes observed for this contact during
+  the current connection. This history is in memory and clears on reconnect.
+
+A save reads the current contact by full key, patches only its path, waits for the generic radio
+ACK, and reads the contact again to verify the exact route. Names, flags, advert timestamps,
+location, modification timestamp and unknown trailing fields are preserved. Readback updates
+both the displayed route and the backend contact used for sends and traceroutes. Rejection,
+timeout or a different readback is shown as unverified; refresh before retrying. Route operations
+share the companion's serial command queue with stats and adverts, and defer contact-sync pushes
+until the operation finishes. They do not change another radio or remote repeater settings.
+
+Path length is bounded by 63 hops and the radio's 64-byte path buffer. Two-/three-byte hash
+controls appear only when the companion reports the corresponding device-info capability.
+Three-byte routes can be saved, but the trace format cannot represent three-byte hashes, so
+traceroute reports that limitation instead of truncating them.
+
+These are stored radio routes, not an app-side lock: firmware may replace them when learning a
+new path. DualMesh does not implement MeshCore-open's weighted automatic route rotation/retries.
+Discovery uses RF and may time out or be unsupported by firmware. It does not save automatically;
+simply opening the editor or changing a draft sends no route writes or discovery requests.
+
 ## Statistics and advertisements
 
 Open **Radio actions** and choose the connected source radio. **Request stats** performs an

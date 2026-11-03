@@ -7,6 +7,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -21,18 +23,18 @@ internal enum class NodeSort(val label: String) {
     LAST_HEARD("Last heard"), NAME("Name"), HOPS("Hops"), SIGNAL("Signal")
 }
 
-internal fun sortNodeList(nodes: List<MeshNode>, sort: NodeSort): List<MeshNode> {
+internal fun sortNodeList(nodes: List<MeshNode>, sort: NodeSort, favorites: Set<String> = emptySet()): List<MeshNode> {
     val comparator = when (sort) {
         NodeSort.LAST_HEARD -> compareByDescending<MeshNode> { it.lastHeardMillis }
         NodeSort.NAME -> compareBy { it.name.lowercase(java.util.Locale.ROOT) }
         NodeSort.HOPS -> compareBy { it.hopsAway ?: Int.MAX_VALUE }
         NodeSort.SIGNAL -> compareByDescending { it.snr ?: Float.NEGATIVE_INFINITY }
     }
-    return nodes.sortedWith(comparator.thenBy { it.name.lowercase(java.util.Locale.ROOT) }.thenBy(::mapNodeKey))
+    return nodes.sortedWith(compareByDescending<MeshNode> { mapNodeKey(it) in favorites }.then(comparator).thenBy { it.name.lowercase(java.util.Locale.ROOT) }.thenBy(::mapNodeKey))
 }
 
 @Composable
-internal fun CompactNodeRow(node: MeshNode, onClick: () -> Unit) {
+internal fun CompactNodeRow(node: MeshNode, favorite: Boolean = false, onFavorite: () -> Unit = {}, onClick: () -> Unit) {
     val accent = if (node.network == MeshNetwork.MESHCORE) NeonViolet else NeonBlue
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Surface(Modifier.size(44.dp), shape = CircleShape, color = accent.copy(alpha = 0.15f), contentColor = accent) {
@@ -45,10 +47,18 @@ internal fun CompactNodeRow(node: MeshNode, onClick: () -> Unit) {
             Text("${if (node.network == MeshNetwork.MESHCORE) "MC" else "MT"} · ${node.deviceName.ifBlank { "Saved radio" }}${node.role?.let { " · $it" }.orEmpty()}", style = MaterialTheme.typography.bodySmall, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(nodeLastSeenLabel(node), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        FavoriteNodeButton(favorite, onFavorite)
         Column(horizontalAlignment = Alignment.End) {
             Text(if (node.viaMqtt == true) "MQTT" else node.hopsAway?.let { if (it == 0) "Direct" else "$it hops" } ?: "—", style = MaterialTheme.typography.labelMedium)
             node.snr?.let { Text("%.1f dB".format(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
+    }
+}
+
+@Composable
+internal fun FavoriteNodeButton(favorite: Boolean, onClick: () -> Unit) {
+    IconToggleButton(checked = favorite, onCheckedChange = { onClick() }, modifier = Modifier.semantics { contentDescription = if (favorite) "Remove favorite" else "Add favorite" }) {
+        Text(if (favorite) "★" else "☆", fontSize = 24.sp, color = if (favorite) WarningAmber else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

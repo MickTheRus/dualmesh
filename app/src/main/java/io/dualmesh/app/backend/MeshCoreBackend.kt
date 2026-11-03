@@ -111,7 +111,15 @@ class MeshCoreBackend(
             mainHandler.postDelayed(callback, delay)
             ({ mainHandler.removeCallbacks(callback) })
         },
+        onContact = ::updateContact,
+        onIdle = { mainHandler.post {
+            if (pendingContactSync && _connectionState.value == ConnectionState.CONNECTED && !nodeActionsController.busy) {
+                pendingContactSync = false
+                beginContactSync()
+            }
+        } },
     )
+    override val contactRoutes: io.dualmesh.app.nodes.ContactRoutes get() = nodeActionsController
     override val nodeActions: io.dualmesh.app.nodes.NodeActions get() = nodeActionsController
     override val settingsAccess: io.dualmesh.app.settings.RadioSettingsAccess get() = settingsController
     private val handshakeTimeout = Runnable {
@@ -138,6 +146,7 @@ class MeshCoreBackend(
     private var channelSlotCount = MeshCoreProtocol.MAX_CHANNELS
     private var waitingForSetTime = false
     private var waitingForContacts = false
+    private var pendingContactSync = false
     private val contactDetails = mutableMapOf<String, MeshCoreProtocol.ContactInfo>()
     private val pendingTraces = mutableMapOf<UInt, PendingTrace>()
 
@@ -147,6 +156,7 @@ class MeshCoreBackend(
     )
 
     override fun connect(address: String, name: String) {
+        pendingContactSync = false
         nodeActionsController.reset()
         settingsController.reset()
         clearStartupCallbacks()
@@ -167,6 +177,7 @@ class MeshCoreBackend(
     }
 
     override fun disconnect() {
+        pendingContactSync = false
         nodeActionsController.reset()
         settingsController.reset()
         clearHandshakeTimeout()
@@ -322,6 +333,7 @@ class MeshCoreBackend(
 
     override fun onDisconnected() {
         if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onDisconnected() }; return }
+        pendingContactSync = false
         nodeActionsController.reset()
         settingsController.reset()
         clearHandshakeTimeout()
@@ -332,6 +344,7 @@ class MeshCoreBackend(
 
     override fun onError(message: String) {
         if (Looper.myLooper() != Looper.getMainLooper()) { mainHandler.post { onError(message) }; return }
+        pendingContactSync = false
         nodeActionsController.reset()
         settingsController.reset()
         clearHandshakeTimeout()
@@ -350,6 +363,7 @@ class MeshCoreBackend(
             payload = value,
             summary = describeIncomingFrame(value),
         )
+        nodeActionsController.observeDeviceInfo(value)
         if (nodeActionsController.receive(value)) return
         if (settingsController.receive(value)) return
         settingsController.observe(value)
@@ -379,30 +393,7 @@ class MeshCoreBackend(
             }
             advanceChannelScan(info.index + 1)
         }
-        MeshCoreProtocol.parseContact(value)?.let { contact ->
-            contactDetails[contact.publicKey] = contact
-            mainHandler.removeCallbacks(contactQueryTimeout)
-            val updated = _contacts.value.filterNot { it.id == contact.publicKey } +
-                RadioContact(contact.publicKey, contact.name)
-            _contacts.value = updated.sortedBy { it.name.lowercase() }
-            val node = MeshNode(
-                network = network,
-                id = contact.publicKey,
-                name = contact.name,
-                publicKey = contact.publicKey,
-                role = meshCoreAdvertType(contact.type),
-                messageable = true,
-                flags = contact.flags,
-                lastHeardMillis = contact.lastAdvertMillis,
-                latitude = contact.latitude,
-                longitude = contact.longitude,
-                positionTimeMillis = contact.lastAdvertMillis.takeIf { it > 0 },
-                source = "MeshCore advert",
-            )
-            _nodes.value = (_nodes.value.filterNot { it.id == node.id } + node)
-                .sortedBy { it.name.lowercase() }
-            mainHandler.postDelayed(contactQueryTimeout, CONTACT_SYNC_TIMEOUT_MS)
-        }
+        updateContact(value)
         when (value[0].toInt() and 0xff) {
             MeshCoreProtocol.RESPONSE_CONTACTS_START -> {
                 waitingForContacts = true
@@ -451,13 +442,41 @@ class MeshCoreBackend(
             PUSH_CONTACT_UPDATED,
             PUSH_PATH_UPDATED,
             PUSH_NEW_ADVERT,
-            -> beginContactSync()
+            -> if (nodeActionsController.busy) pendingContactSync = true else beginContactSync()
             MeshCoreProtocol.PUSH_MESSAGE_WAITING,
             MeshCoreProtocol.RESPONSE_CONTACT_MESSAGE,
             MeshCoreProtocol.RESPONSE_CHANNEL_MESSAGE,
             MeshCoreProtocol.RESPONSE_CONTACT_MESSAGE_V3,
             MeshCoreProtocol.RESPONSE_CHANNEL_MESSAGE_V3,
             -> writeFrame(MeshCoreProtocol.syncNextMessage(), "CMD_SYNC_NEXT_MESSAGE")
+        }
+    }
+
+    private fun updateContact(frame: ByteArray) {
+        nodeActionsController.observeContact(frame)
+        MeshCoreProtocol.parseContact(frame)?.let { contact ->
+            contactDetails[contact.publicKey] = contact
+            if (waitingForContacts) mainHandler.removeCallbacks(contactQueryTimeout)
+            val updated = _contacts.value.filterNot { it.id == contact.publicKey } +
+                RadioContact(contact.publicKey, contact.name)
+            _contacts.value = updated.sortedBy { it.name.lowercase() }
+            val node = MeshNode(
+                network = network,
+                id = contact.publicKey,
+                name = contact.name,
+                publicKey = contact.publicKey,
+                role = meshCoreAdvertType(contact.type),
+                messageable = true,
+                flags = contact.flags,
+                lastHeardMillis = contact.lastAdvertMillis,
+                latitude = contact.latitude,
+                longitude = contact.longitude,
+                positionTimeMillis = contact.lastAdvertMillis.takeIf { it > 0 },
+                source = "MeshCore advert",
+            )
+            _nodes.value = (_nodes.value.filterNot { it.id == node.id } + node)
+                .sortedBy { it.name.lowercase() }
+            if (waitingForContacts) mainHandler.postDelayed(contactQueryTimeout, CONTACT_SYNC_TIMEOUT_MS)
         }
     }
 

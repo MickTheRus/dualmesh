@@ -36,7 +36,11 @@ The tests examine these functions:
 - Node actions: serialized MeshCore stats and advert ACKs, legacy/unsigned counters, signed
   radio metrics, Meshtastic local/remote telemetry correlation, routing failures, timeout/reset,
   and exact zero-hop/flood packets without broadcast ACKs or reply requests.
-- Node list sorting with missing hop and signal values.
+- Node list sorting with missing hop and signal values, favorites-first ordering, and favorites
+  filtering scoped to network/source radio.
+- MeshCore route encoding and capacity, capability checks, fresh contact preservation, ACK and
+  readback matching, direct/flood behavior, discovery response matching and parsing, timeout/reset,
+  rejection/mismatch handling, and refusing to truncate three-byte hashes for traceroute.
 - Map filters across both technologies and source radios, unknown-name rules, MQTT and direct
   filters, last-heard boundaries, infrastructure roles, and coordinate validity.
 - Connection-profile storage.

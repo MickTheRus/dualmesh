@@ -40,7 +40,10 @@ The screenshots contain test data. They do not contain data from a real deployme
 9. Select **Nodes** or **Nodes / Map** to open the compact node list, then **Map** for positions.
 10. Search by node name, ID, role, hardware, channel, or radio name. Use MC/MT chips and
     **Filters** to select networks, radios, node roles, and last-heard limits.
-11. Open a node for details and **Trace**, or use **Radio actions** to request stats and advertise.
+11. Star nodes to save favorites; use **★ Favorites** to filter them. Open a node for grouped
+    details and **Trace route**, or use **Radio actions** to request stats and advertise.
+12. For MeshCore contacts, use **Route > Set route** to edit direct, flood, or manual paths and
+    discover a route to review before saving.
 
 Enable **Packets** only when you must record protocol traffic.
 

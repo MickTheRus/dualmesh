@@ -132,6 +132,7 @@ object MeshCoreProtocol {
             else -> throw IllegalArgumentException("MeshCore trace hash size must be 1, 2, 4, or 8")
         }
         require(pathHashes.isNotEmpty()) { "MeshCore trace needs at least one path hop" }
+        require(pathHashes.size <= 64 && pathHashes.size * hashSize < 179) { "The round-trip route is too long for a MeshCore trace packet" }
         val path = pathHashes.map { hash ->
             val bytes = hash.hexToByteArray()
             require(bytes.size == hashSize) {
@@ -153,9 +154,9 @@ object MeshCoreProtocol {
      * The contact hash is always the turn-around hop, including for a direct contact.
      */
     fun tracePath(contact: ContactInfo): TracePath {
-        val hashSize = when (contact.outPathHashSize) {
+        val hashSize = if (contact.outPath.isEmpty()) 1 else when (contact.outPathHashSize) {
             0 -> 1
-            3 -> 2
+            3 -> throw IllegalArgumentException("Traceroute cannot encode 3-byte path hashes; choose a 1- or 2-byte route")
             1, 2, 4, 8 -> contact.outPathHashSize
             else -> throw IllegalArgumentException(
                 "MeshCore contact uses an unsupported path hash size",
@@ -163,7 +164,7 @@ object MeshCoreProtocol {
         }
         val storedPath = contact.outPath
             .map { it.take(hashSize * 2) }
-            .let { if (contact.outPathHashSize == 3) it.asReversed() else it }
+
         var hashes = listOf(contact.publicKey.take(hashSize * 2))
         storedPath.asReversed().forEach { hash ->
             hashes = listOf(hash) + hashes + hash

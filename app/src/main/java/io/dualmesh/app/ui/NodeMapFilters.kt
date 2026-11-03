@@ -4,6 +4,7 @@ import io.dualmesh.app.model.MeshNetwork
 import io.dualmesh.app.model.MeshNode
 
 internal data class NodeMapFilters(
+    val onlyFavorites: Boolean = false,
     val meshCore: Boolean = true,
     val meshtastic: Boolean = true,
     val includeUnknown: Boolean = true,
@@ -24,9 +25,11 @@ internal fun filterMapNodes(
     filters: NodeMapFilters,
     query: String,
     nowMillis: Long,
+    favorites: Set<String> = emptySet(),
 ): List<MeshNode> = filterNodes(nodes, query).filter { node ->
     val heard = node.lastHeardMillis > 0
     val age = (nowMillis - node.lastHeardMillis).coerceAtLeast(0)
+    (!filters.onlyFavorites || mapNodeKey(node) in favorites) &&
     (if (node.network == MeshNetwork.MESHCORE) filters.meshCore else filters.meshtastic) &&
         (filters.radioId == null || node.deviceId == filters.radioId) &&
         (filters.includeUnknown || node.hasKnownMapIdentity()) &&

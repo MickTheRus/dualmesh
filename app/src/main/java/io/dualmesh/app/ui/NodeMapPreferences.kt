@@ -7,6 +7,7 @@ internal class NodeMapPreferences(context: Context) {
     private val preferences = context.getSharedPreferences("node_map_preferences", Context.MODE_PRIVATE)
 
     fun load(): NodeMapFilters = NodeMapFilters(
+        onlyFavorites = preferences.getBoolean("only_favorites", false),
         meshCore = preferences.getBoolean("mesh_core", true),
         meshtastic = preferences.getBoolean("meshtastic", true),
         includeUnknown = preferences.getBoolean("include_unknown", true),
@@ -23,6 +24,7 @@ internal class NodeMapPreferences(context: Context) {
     )
 
     fun save(filters: NodeMapFilters) = preferences.edit {
+        putBoolean("only_favorites", filters.onlyFavorites)
         putBoolean("mesh_core", filters.meshCore)
         putBoolean("meshtastic", filters.meshtastic)
         putBoolean("include_unknown", filters.includeUnknown)

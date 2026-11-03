@@ -55,6 +55,9 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
     val traces by manager.traceRouteResults.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val preferences = remember(context) { NodeMapPreferences(context) }
+    val favoriteStore = remember(context) { NodeFavorites(context) }
+    var favorites by remember { mutableStateOf(favoriteStore.load()) }
+    var routeNode by remember { mutableStateOf<MeshNode?>(null) }
     var filters by remember { mutableStateOf(preferences.load()) }
     var query by rememberSaveable { mutableStateOf("") }
     var showFilters by rememberSaveable { mutableStateOf(false) }
@@ -64,6 +67,7 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
     var sortMenu by remember { mutableStateOf(false) }
     var radioMenu by remember { mutableStateOf(false) }
     var actionTarget by remember { mutableStateOf<NodeActionTarget?>(null) }
+    var showNodeDetails by rememberSaveable { mutableStateOf(false) }
     var selectedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var fitRequest by remember { mutableIntStateOf(0) }
     var traceError by remember { mutableStateOf<String?>(null) }
@@ -74,10 +78,10 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
             now = System.currentTimeMillis()
         }
     }
-    val visible = remember(nodes, filters, query, now) { filterMapNodes(nodes, filters, query, now) }
-    val sortedNodes = remember(visible, sort) { sortNodeList(visible, sort) }
+    val visible = remember(nodes, filters, query, now, favorites) { filterMapNodes(nodes, filters, query, now, favorites) }
+    val sortedNodes = remember(visible, sort, favorites) { sortNodeList(visible, sort, favorites) }
     val positioned = remember(visible) { visible.filter { it.hasValidMapPosition() } }
-    val selected = visible.firstOrNull { mapNodeKey(it) == selectedKey }
+    val selected = nodes.firstOrNull { mapNodeKey(it) == selectedKey }
     val connections = mcConnections + mtConnections
     val radios = remember(nodes, connections) {
         (nodes.map { it.deviceId to it.deviceName.ifBlank { "${it.network.label} radio" } } +
@@ -96,26 +100,26 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
         it.profile.network == node.network && MultiDeviceBackend.targetId(it.profile) == node.deviceId &&
             it.state == ConnectionState.CONNECTED
     }
-    @Composable fun NodeDetails(node: MeshNode) {
-        Column {
-            Text(
-                "${node.network.label} · ${node.deviceName.ifBlank { "Saved radio" }}",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (node.network == MeshNetwork.MESHCORE) NeonViolet else NeonBlue,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-            NodeDirectoryRow(
-                node = node,
-                traces = traces.filter {
-                    it.network == node.network && it.deviceId == node.deviceId && it.targetId == node.id
-                },
-                traceEnabled = traceEnabled(node),
-                onTrace = {
-                    traceError = manager.traceRoute(node.network, node.deviceId, node.id).exceptionOrNull()?.message
-                },
-            )
-        }
+    fun toggleFavorite(node: MeshNode) {
+        val key = mapNodeKey(node)
+        favorites = if (key in favorites) favorites - key else favorites + key
+        favoriteStore.save(favorites)
     }
+    fun connected(node: MeshNode): Boolean = connections.any {
+        it.profile.network == node.network && MultiDeviceBackend.targetId(it.profile) == node.deviceId && it.state == ConnectionState.CONNECTED
+    }
+    @Composable fun NodeDetails(node: MeshNode) {
+        NodeDetailContent(
+            node = node, favorite = mapNodeKey(node) in favorites, onFavorite = { toggleFavorite(node) },
+            traces = traces.filter { it.network == node.network && it.deviceId == node.deviceId && it.targetId == node.id },
+            traceEnabled = traceEnabled(node),
+            onTrace = { traceError = manager.traceRoute(node.network, node.deviceId, node.id).exceptionOrNull()?.message },
+            onMap = { selectedKey = mapNodeKey(node); showNodeDetails = false; showDirectory = false },
+            onStats = if (node.network == MeshNetwork.MESHTASTIC && connected(node)) ({ actionTarget = NodeActionTarget(node.network, node.deviceId, node.deviceName, node.id) }) else null,
+            onRoute = if (node.network == MeshNetwork.MESHCORE && connected(node)) ({ routeNode = node }) else null,
+        )
+    }
+
     Dialog(
         onDismissRequest = { if (selected != null) selectedKey = null else onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -145,6 +149,7 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
                         selected = filters.meshCore && filters.meshtastic,
                         onClick = { update(filters.copy(meshCore = true, meshtastic = true)) }, label = { Text("Both") },
                     )
+                    FilterChip(selected = filters.onlyFavorites, onClick = { update(filters.copy(onlyFavorites = !filters.onlyFavorites)) }, label = { Text("★ Favorites") })
                     FilterChip(selected = filters.meshCore, onClick = { update(filters.copy(meshCore = !filters.meshCore)) }, label = { Text("MC · MeshCore") })
                     FilterChip(selected = filters.meshtastic, onClick = { update(filters.copy(meshtastic = !filters.meshtastic)) }, label = { Text("MT · Meshtastic") })
                 }
@@ -176,7 +181,7 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
                 if (showDirectory) {
                     LazyColumn(Modifier.fillMaxWidth().weight(1f), state = listState) {
                         items(sortedNodes, key = ::mapNodeKey) { node ->
-                            CompactNodeRow(node) { selectedKey = mapNodeKey(node); traceError = null }
+                            CompactNodeRow(node, mapNodeKey(node) in favorites, onFavorite = { toggleFavorite(node) }) { selectedKey = mapNodeKey(node); showNodeDetails = true; traceError = null }
                             HorizontalDivider(Modifier.padding(start = 72.dp), thickness = 0.5.dp)
                         }
                         if (visible.isEmpty()) item {
@@ -227,8 +232,8 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
                             Text("Selected node", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
                             TextButton(onClick = { selectedKey = null }) { Text("Dismiss") }
                         }
-                        NodeDetails(selected)
-                        traceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        CompactNodeRow(selected, mapNodeKey(selected) in favorites, onFavorite = { toggleFavorite(selected) }) { showNodeDetails = true }
+                        TextButton(onClick = { showNodeDetails = true }) { Text("Node details") }
                     }
                 }
             }
@@ -285,24 +290,26 @@ internal fun MeshMapDialog(manager: DualMeshManager, initialDirectory: Boolean =
                 }
             }
         }
-        if (selected != null && showDirectory) {
-            Dialog(onDismissRequest = { selectedKey = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        if (selected != null && showNodeDetails) {
+            Dialog(onDismissRequest = { showNodeDetails = false; if (showDirectory) selectedKey = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { selectedKey = null }) { Text("‹ Back") }
+                            TextButton(onClick = { showNodeDetails = false; if (showDirectory) selectedKey = null }) { Text("‹ Back") }
                             Text("Node details", style = MaterialTheme.typography.titleLarge)
                         }
-                        NodeDetails(selected)
-                        traceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        if (selected.network == MeshNetwork.MESHTASTIC) TextButton(
-                            enabled = connections.any { MultiDeviceBackend.targetId(it.profile) == selected.deviceId && it.state == ConnectionState.CONNECTED },
-                            onClick = { actionTarget = NodeActionTarget(selected.network, selected.deviceId, selected.deviceName, selected.id) },
-                        ) { Text("Request node stats") }
-                        if (selected.hasValidMapPosition()) TextButton(onClick = { showDirectory = false }) { Text("Show on map") }
+                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                            NodeDetails(selected)
+                            traceError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        }
                     }
                 }
             }
+        }
+        routeNode?.let { node ->
+            val access = manager.meshCore.contactRoutesFor(node.deviceId)
+            if (access != null) ContactRouteDialog(node, nodes, access, onDismiss = { routeNode = null })
+            else AlertDialog(onDismissRequest = { routeNode = null }, text = { Text("The source radio is no longer connected") }, confirmButton = { TextButton(onClick = { routeNode = null }) { Text("Done") } })
         }
         actionTarget?.let { target ->
             val backend = if (target.network == MeshNetwork.MESHCORE) manager.meshCore else manager.meshtastic

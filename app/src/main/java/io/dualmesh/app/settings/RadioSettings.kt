@@ -58,6 +58,7 @@ internal class RadioCommandQueue<T>(
         val accept: (T) -> SettingsReply,
         val received: (T) -> Unit = {},
         val optional: Boolean = false,
+        val timeoutMillis: Long? = null,
     )
     private val steps = ArrayDeque<Step<T>>()
     private var cancelTimeout: (() -> Unit)? = null
@@ -98,7 +99,7 @@ internal class RadioCommandQueue<T>(
     private fun advance() {
         val step = steps.firstOrNull() ?: return finish(null)
         val version = ++generation
-        cancelTimeout = scheduler.after(timeoutMillis) {
+        cancelTimeout = scheduler.after(step.timeoutMillis ?: timeoutMillis) {
             if (version == generation) {
                 if (step.optional) { steps.removeFirst(); advance() }
                 else finish(timeoutMessage)
