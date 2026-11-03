@@ -255,6 +255,7 @@ class MeshtasticBackend(
                 timestampMillis = System.currentTimeMillis(),
                 outgoing = true,
                 deliveryState = DeliveryState.SENT_TO_RADIO,
+                channelIndex = packet.channel,
             ),
         )
         return Result.success(Unit)
@@ -303,8 +304,31 @@ class MeshtasticBackend(
                 timestampMillis = System.currentTimeMillis(),
                 outgoing = true,
                 deliveryState = DeliveryState.SENT_TO_RADIO,
+                channelIndex = packet.channel,
             ),
         )
+        return Result.success(Unit)
+    }
+
+    override fun sendReaction(message: UnifiedMessage, emoji: String): Result<Unit> {
+        if (_connectionState.value != ConnectionState.CONNECTED) {
+            return Result.failure(IllegalStateException("The message's source radio is not ready"))
+        }
+        val packet = runCatching {
+            io.dualmesh.app.protocol.meshtasticReactionPacket(message, emoji, myNodeNum,
+                Random.nextInt(1, Int.MAX_VALUE), loraConfig?.hop_limit ?: 3)
+        }.getOrElse { return Result.failure(it) }
+        if (_channels.value.none { it.index == packet.channel }) {
+            return Result.failure(IllegalStateException("The original channel is no longer enabled on this radio"))
+        }
+        if (!sendTransport(ToRadio(packet = packet).encode())) {
+            return Result.failure(IllegalStateException("Meshtastic transport is unavailable"))
+        }
+        messageDelivery.track(UnifiedMessage(
+            id = packet.id.toUInt().toString(), network = network, conversationId = message.conversationId,
+            sender = "You", text = emoji.trim(), timestampMillis = System.currentTimeMillis(), outgoing = true,
+            deliveryState = DeliveryState.SENT_TO_RADIO, reactionToMessageId = message.id, reactionEmoji = emoji.trim(), channelIndex = packet.channel,
+        ))
         return Result.success(Unit)
     }
 
@@ -581,6 +605,7 @@ class MeshtasticBackend(
                 deliveryState = DeliveryState.RECEIVED,
                 reactionToMessageId = metadata.reactionToMessageId,
                 reactionEmoji = metadata.reactionEmoji,
+                channelIndex = packet.channel,
                 hopsAway = if (outgoing) null else packet.messageHops(),
                 viaMqtt = if (outgoing) null else packet.via_mqtt,
                 snr = if (outgoing) null else packet.rx_snr.takeIf { it != 0f },

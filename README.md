@@ -47,6 +47,9 @@ The screenshots contain test data. They do not contain data from a real deployme
 12. For MeshCore contacts, use **Route > Set route** to edit direct, flood, or manual paths and
     discover a route to review before saving.
 
+Long-press a Meshtastic message or tap **React** to add an emoji. Tap an existing reaction to
+add the same emoji; long-press its chip to see who reacted and your delivery status.
+
 Enable packet recording under **View > Packet logs** only when you must record protocol traffic.
 
 WARNING: A packet log can contain keys, messages, node IDs, and locations.
@@ -125,7 +128,7 @@ Refresh reads configuration without changing it.
 - Find the channels that each radio supplies.
 - Send and receive channel messages.
 - Send and receive direct messages.
-- Show Meshtastic reactions below the related message.
+- Send and receive native Meshtastic reactions using quick emoji, a larger picker, or the keyboard.
 - Show per-message delivery confirmations, RF/MQTT source, and reported receive hop counts.
 - Save the newest 5,000 messages in SQLite.
 - Save node details and the latest node positions for each radio.

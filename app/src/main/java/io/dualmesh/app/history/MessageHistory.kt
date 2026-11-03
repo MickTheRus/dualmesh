@@ -35,5 +35,13 @@ internal fun mergeMessageObservation(previous: UnifiedMessage?, incoming: Unifie
         snr = incoming.snr ?: previous.snr,
         rssi = incoming.rssi ?: previous.rssi,
         receptionPath = incoming.receptionPath ?: previous.receptionPath,
+        channelIndex = incoming.channelIndex ?: previous.channelIndex,
     )
 }
+
+internal fun hasOwnReaction(history: List<UnifiedMessage>, parent: UnifiedMessage, emoji: String): Boolean =
+    history.any {
+        it.network == parent.network && it.deviceId == parent.deviceId && it.outgoing &&
+            it.reactionToMessageId == parent.id && it.reactionEmoji == emoji &&
+            it.deliveryState !in setOf(io.dualmesh.app.model.DeliveryState.ERROR, io.dualmesh.app.model.DeliveryState.UNCONFIRMED)
+    }

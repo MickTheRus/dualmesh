@@ -29,7 +29,7 @@ The tests examine these functions:
 - Message hop metadata, signed MeshCore SNR, direct-route unknown hops, and delivery/metadata
   preservation across radio echoes.
 - Device-side message history metadata round trips, delivery updates without duplicate rows,
-  migrations from versions 1/2/3, and interrupted confirmation handling.
+  migrations from versions 1/2/3/4, and interrupted confirmation handling.
 - 10,000 random invalid MeshCore frames.
 - Meshtastic Stream API frames.
 - Split Meshtastic frames and wake bytes.
@@ -55,6 +55,9 @@ The tests examine these functions:
 - Map filters across both technologies and source radios, unknown-name rules, MQTT and direct
   filters, last-heard boundaries, infrastructure roles, and coordinate validity.
 - Connection-profile storage.
+- Native reaction packet encode/decode, unsigned reply IDs, channel/DM addressing, configured hop
+  limit/ACK request, multi-codepoint emoji payloads, validation, per-radio duplicate prevention,
+  scoped attachment, and failed-attempt replacement.
 - Meshtastic reaction detection.
 - Meshtastic reaction attachment and duplicate removal.
 

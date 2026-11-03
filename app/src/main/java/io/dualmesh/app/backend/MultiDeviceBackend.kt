@@ -196,6 +196,10 @@ class MultiDeviceBackend(
         outboundBackend()?.sendDirectMessage(text, contactId)
             ?: Result.failure(IllegalStateException("No outbound ${network.label} device"))
 
+    override fun sendReaction(message: UnifiedMessage, emoji: String): Result<Unit> =
+        slots[message.deviceId]?.backend?.sendReaction(message, emoji)
+            ?: Result.failure(IllegalStateException("The message's source radio is not connected"))
+
     override fun traceRoute(contactId: String): Result<Unit> =
         outboundBackend()?.traceRoute(contactId)
             ?: Result.failure(IllegalStateException("No outbound ${network.label} device"))

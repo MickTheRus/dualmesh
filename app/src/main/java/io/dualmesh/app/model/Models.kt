@@ -117,6 +117,7 @@ data class UnifiedMessage(
     val rssi: Int? = null,
     val receptionPath: String? = null,
     val deliveryDetail: String? = null,
+    val channelIndex: Int? = null,
 ) {
     val isReaction: Boolean
         get() = reactionToMessageId != null && reactionEmoji != null

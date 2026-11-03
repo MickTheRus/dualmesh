@@ -7,6 +7,8 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -854,6 +856,13 @@ private fun NetworkPane(
         MessageList(
             messages = conversationMessages,
             conversationName = conversationName,
+            canReact = { message ->
+                message.network == MeshNetwork.MESHTASTIC && !message.isReaction && message.id.toUIntOrNull()?.let { it != 0u } == true &&
+                    message.deviceId.isNotBlank() && deviceConnections.any {
+                        MultiDeviceBackend.targetId(it.profile) == message.deviceId && it.state == ConnectionState.CONNECTED
+                    }
+            },
+            onReact = manager::sendReaction,
             modifier = Modifier.weight(1f),
         )
         MessageComposer(
@@ -1447,6 +1456,8 @@ private fun ConversationSelector(
 private fun MessageList(
     messages: List<UnifiedMessage>,
     conversationName: String,
+    canReact: (UnifiedMessage) -> Boolean,
+    onReact: (UnifiedMessage, String) -> Result<Unit>,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -1486,7 +1497,7 @@ private fun MessageList(
             threadItems,
             key = { "${it.message.network}:${it.message.id}" },
         ) { item ->
-            MessageBubble(item.message, item.reactions)
+            MessageBubble(item.message, item.reactions, canReact(item.message)) { emoji -> onReact(item.message, emoji) }
         }
     }
 }
@@ -1495,7 +1506,19 @@ private fun MessageList(
 private fun MessageBubble(
     message: UnifiedMessage,
     reactions: List<UnifiedMessage> = emptyList(),
+    canReact: Boolean = false,
+    onReact: (String) -> Result<Unit> = { Result.failure(IllegalStateException("Reactions unavailable")) },
 ) {
+    var showReactions by rememberSaveable(message.id) { mutableStateOf(false) }
+    var reactionError by rememberSaveable(message.id) { mutableStateOf<String?>(null) }
+    fun react(emoji: String): Boolean {
+        val result = onReact(emoji)
+        reactionError = result.exceptionOrNull()?.message
+        if (result.isSuccess) showReactions = false
+        return result.isSuccess
+    }
+    LaunchedEffect(canReact) { if (!canReact) showReactions = false }
+    if (showReactions && canReact) ReactionPicker(message, reactions, onDismiss = { showReactions = false }, onReact = ::react, error = reactionError)
     Box(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = if (message.outgoing) Alignment.CenterEnd else Alignment.CenterStart,
@@ -1523,6 +1546,7 @@ private fun MessageBubble(
                             bottomEnd = if (message.outgoing) 7.dp else 22.dp,
                         ),
                     )
+                    .combinedClickable(enabled = canReact, onClick = {}, onLongClickLabel = "Add reaction", onLongClick = { reactionError = null; showReactions = true })
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1547,33 +1571,13 @@ private fun MessageBubble(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            MessageMetadata(message)
-            ReactionStrip(reactions)
-        }
-    }
-}
-
-@Composable
-private fun ReactionStrip(reactions: List<UnifiedMessage>) {
-    val chips = remember(reactions) { summarizeReactions(reactions).take(MAX_VISIBLE_REACTIONS) }
-    if (chips.isEmpty()) return
-    Row(
-        modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        chips.forEach { chip ->
-            Surface(
-                shape = CircleShape,
-                color = GlassSurfaceStrong,
-                border = BorderStroke(1.dp, NeonBlue.copy(alpha = 0.42f)),
-            ) {
-                Text(
-                    text = if (chip.count == 1) chip.emoji else "${chip.emoji} ${chip.count}",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                MessageMetadata(message)
+                if (canReact) Text("React", Modifier.clickable { reactionError = null; showReactions = true }.padding(8.dp),
+                    style = MaterialTheme.typography.labelSmall, color = NeonBlue)
             }
+            MessageReactionStrip(reactions, canReact, onReact = { react(it) }, onAdd = { reactionError = null; showReactions = true })
+            if (reactionError != null && !showReactions) Text(reactionError!!, style = MaterialTheme.typography.labelSmall, color = SignalRed)
         }
     }
 }
@@ -1652,7 +1656,6 @@ private fun networkAccent(network: MeshNetwork): Color = when (network) {
 }
 
 private const val MAX_VISIBLE_CONTACT_RESULTS = 30
-private const val MAX_VISIBLE_REACTIONS = 5
 private const val MAX_VISIBLE_TRACE_HISTORY = 25
 private val TABLET_TWO_PANE_WIDTH = 720.dp
 private const val LAYOUT_PREFERENCES_NAME = "layout_preferences"

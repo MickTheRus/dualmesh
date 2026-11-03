@@ -361,6 +361,19 @@ class DualMeshManager(private val context: Context) {
         }
     }
 
+    private val pendingReactions = mutableSetOf<Triple<String, String, String>>()
+
+    fun sendReaction(message: UnifiedMessage, emoji: String): Result<Unit> {
+        if (message.network != MeshNetwork.MESHTASTIC || message.isReaction || message.deviceId.isBlank()) {
+            return Result.failure(IllegalArgumentException("This message does not support native reactions"))
+        }
+        val key = Triple(message.deviceId, message.id, emoji.trim())
+        if (key in pendingReactions || io.dualmesh.app.history.hasOwnReaction(_messages.value, message, emoji.trim())) return Result.success(Unit)
+        val result = backends.getValue(message.network).sendReaction(message, emoji.trim())
+        if (result.isSuccess) pendingReactions += key
+        return result
+    }
+
     fun channelName(network: MeshNetwork, channel: Int): String =
         backends.getValue(network).channels.value
             .firstOrNull { it.index == channel }
@@ -447,6 +460,9 @@ class DualMeshManager(private val context: Context) {
                     }
                     .getOrNull()
                 _messages.value = mergeMessages(_messages.value, listOf(resolvedMessage))
+                if (resolvedMessage.outgoing && resolvedMessage.isReaction) {
+                    pendingReactions.remove(Triple(resolvedMessage.deviceId, resolvedMessage.reactionToMessageId!!, resolvedMessage.reactionEmoji!!))
+                }
                 if (newInDatabase ?: newInMemory) _messageEvents.emit(resolvedMessage)
             }
         }

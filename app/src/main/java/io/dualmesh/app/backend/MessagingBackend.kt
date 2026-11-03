@@ -34,5 +34,7 @@ interface MessagingBackend {
     fun selectChannel(index: Int)
     fun sendChannelMessage(text: String, channel: Int = 0): Result<Unit>
     fun sendDirectMessage(text: String, contactId: String): Result<Unit>
+    fun sendReaction(message: UnifiedMessage, emoji: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("${network.label} does not support native message reactions"))
     fun traceRoute(contactId: String): Result<Unit>
 }

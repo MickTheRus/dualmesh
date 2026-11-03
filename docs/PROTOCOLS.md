@@ -182,7 +182,9 @@ The app does not use value `69420`. Meshtastic reserves this value for
 - The backend also checks `Constants.DATA_PAYLOAD_LEN`.
 
 A text packet is a reaction only when `Data.reply_id` and `Data.emoji` are not zero. The UTF-8
-payload contains the reaction. The app saves the related packet ID.
+payload contains the reaction. The app saves the related packet ID. Sending uses the same
+fields with emoji indicator 1 and the original radio/channel or DM conversation partner.
+See [message reactions](MESSAGE_DELIVERY.md#sending-reactions) for picker and retry behavior.
 
 The user interface puts a reaction chip below the related message. It removes a duplicate reaction
 from the same sender. It shows a count when more than one sender uses the same reaction.
@@ -239,7 +241,8 @@ all targets for that technology.
 ```
 
 Database version 2 added the radio ID. Database version 3 added reaction fields. Version 4 adds
-delivery detail, receive hop count, RF/MQTT source, signal readings, and route type. All migrations
+delivery detail, receive hop count, RF/MQTT source, signal readings, and route type. Version 5
+retains the per-message channel index used for reaction replies, including DMs. All migrations
 keep old message rows.
 
 The app loads history before it saves new backend messages. A history load does not create a new

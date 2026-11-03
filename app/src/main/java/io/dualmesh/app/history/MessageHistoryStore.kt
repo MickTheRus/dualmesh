@@ -52,6 +52,7 @@ class MessageHistoryStore(
                 rssi INTEGER,
                 reception_path TEXT,
                 delivery_detail TEXT,
+                channel_index INTEGER,
                 PRIMARY KEY (network, device_id, message_id)
             )
             """.trimIndent(),
@@ -104,7 +105,8 @@ class MessageHistoryStore(
                 database.execSQL("ALTER TABLE $TABLE_MESSAGES ADD COLUMN $it")
             }
         }
-        if (oldVersion in 2..3 && newVersion <= DATABASE_VERSION) return
+        if (oldVersion < 5 && newVersion >= 5) database.execSQL("ALTER TABLE $TABLE_MESSAGES ADD COLUMN channel_index INTEGER")
+        if (oldVersion in 2..4 && newVersion <= DATABASE_VERSION) return
         error("No message database migration from $oldVersion to $newVersion")
     }
 
@@ -145,6 +147,7 @@ class MessageHistoryStore(
                         it.name == cursor.getString(deliveryColumn)
                     } ?: DeliveryState.ERROR
                     messages += UnifiedMessage(
+                        channelIndex = cursor.getColumnIndexOrThrow("channel_index").let { if (cursor.isNull(it)) null else cursor.getInt(it) },
                         hopsAway = cursor.getColumnIndexOrThrow("hops_away").let { if (cursor.isNull(it)) null else cursor.getInt(it) },
                         viaMqtt = cursor.getColumnIndexOrThrow("via_mqtt").let { if (cursor.isNull(it)) null else cursor.getInt(it) != 0 },
                         snr = cursor.getColumnIndexOrThrow("snr").let { if (cursor.isNull(it)) null else cursor.getFloat(it) },
@@ -240,12 +243,13 @@ class MessageHistoryStore(
         put("rssi", rssi)
         put("reception_path", receptionPath)
         put("delivery_detail", deliveryDetail)
+        put("channel_index", channelIndex)
     }
 
     companion object {
         const val MAX_STORED_MESSAGES = 5_000
         private const val DATABASE_NAME = "dualmesh_messages.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
         private const val TABLE_MESSAGES = "messages"
         private val COLUMNS = arrayOf(
             "network",
@@ -260,7 +264,7 @@ class MessageHistoryStore(
             "delivery_state",
             "reaction_to_message_id",
             "reaction_emoji",
-            "hops_away", "via_mqtt", "snr", "rssi", "reception_path", "delivery_detail",
+            "hops_away", "via_mqtt", "snr", "rssi", "reception_path", "delivery_detail", "channel_index",
         )
     }
 }
